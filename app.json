@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "GMAX",
+    "slug": "gmax-android",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "backgroundColor": "#050707"
+    },
+    "android": {
+      "package": "com.gmax.player",
+      "versionCode": 1,
+      "permissions": [
+        "WAKE_LOCK",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "INTERNET"
+      ],
+      "adaptiveIcon": {
+        "backgroundColor": "#050707"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.gmax.player",
+      "infoPlist": {
+        "UIBackgroundModes": ["audio"]
+      }
+    },
+    "plugins": [
+      [
+        "expo-av",
+        {
+          "microphonePermission": false
+        }
+      ]
+    ]
+  }
+}
