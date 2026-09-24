@@ -1,4 +1,4 @@
-/** GMAX music search — Saavn + Audius + YouTube (search only / embed play). */
+/** GMAX music search — Saavn + Audius + YouTube (audio stream when possible). */
 
 export type Provider = "saavn" | "audius" | "youtube";
 
@@ -20,11 +20,13 @@ const SAAVN_ENDPOINTS = [
   "https://jiosavan-api-with-playlist.vercel.app/api/search/songs",
 ];
 
+/** Public Invidious mirrors — used for search + audio URL resolve. */
 const INVIDIOUS = [
   "https://inv.nadeko.net",
   "https://invidious.fdn.fr",
   "https://yewtu.be",
   "https://vid.puffyan.us",
+  "https://invidious.privacyredirect.com",
 ];
 
 function pickStream(downloadUrl: unknown): string {
@@ -130,7 +132,6 @@ async function searchAudius(query: string, limit = 15): Promise<Track[]> {
   }
 }
 
-/** YouTube search via public Invidious API (no API key). Play via official embed. */
 async function searchYouTube(query: string, limit = 12): Promise<Track[]> {
   for (const host of INVIDIOUS) {
     try {
@@ -169,6 +170,62 @@ async function searchYouTube(query: string, limit = 12): Promise<Track[]> {
     }
   }
   return [];
+}
+
+type InvFormat = {
+  url?: string;
+  type?: string;
+  itag?: string | number;
+  bitrate?: string | number;
+  encoding?: string;
+  container?: string;
+};
+
+/**
+ * Resolve a playable audio URL for a YouTube videoId via Invidious.
+ * Plays through expo-av → true lock-screen / background audio.
+ */
+export async function resolveYouTubeStream(videoId: string): Promise<string> {
+  const id = videoId.trim();
+  if (!id) return "";
+
+  for (const host of INVIDIOUS) {
+    try {
+      const res = await fetch(`${host}/api/v1/videos/${encodeURIComponent(id)}`, {
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const formats: InvFormat[] = [
+        ...(Array.isArray(data?.adaptiveFormats) ? data.adaptiveFormats : []),
+        ...(Array.isArray(data?.formatStreams) ? data.formatStreams : []),
+      ];
+
+      const audioOnly = formats.filter((f) => {
+        const t = String(f.type || "").toLowerCase();
+        const itag = String(f.itag || "");
+        return t.includes("audio") || itag === "140" || itag === "251" || itag === "250" || itag === "249";
+      });
+
+      const ranked = (audioOnly.length ? audioOnly : formats)
+        .filter((f) => f.url && String(f.url).startsWith("http"))
+        .sort((a, b) => Number(b.bitrate || 0) - Number(a.bitrate || 0));
+
+      if (ranked[0]?.url) return String(ranked[0].url);
+    } catch {
+      /* next host */
+    }
+
+    // Fallback: direct latest_version redirect (itag 140 = m4a audio)
+    try {
+      const url = `${host}/latest_version?id=${encodeURIComponent(id)}&itag=140`;
+      const head = await fetch(url, { method: "HEAD" });
+      if (head.ok || head.status === 302) return url;
+    } catch {
+      /* next */
+    }
+  }
+  return "";
 }
 
 export async function searchMusic(query: string): Promise<Track[]> {
