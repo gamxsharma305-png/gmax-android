@@ -1,92 +1,84 @@
-# GMAX Android (Native)
+# GMAX Android
 
-Native **GMAX** music app — **Expo (React Native)**.
+Expo (React Native) music app — **Saavn + Audius + YouTube** with **lock-screen / background** audio.
 
-Saavn + Audius **direct streams** (true background / lock-screen audio via `expo-av`)  
-+ **YouTube** search & in-app play (official embed via `react-native-youtube-iframe`).
-
-> Website repo is separate. This repo is only for the Android app / APK.
-
----
-
-## Features
-
-| Feature | Notes |
-|---------|--------|
-| Search | JioSaavn + Audius + YouTube (Invidious) |
-| Background audio | Saavn / Audius streams — screen off OK |
-| YouTube | In-app embed; may pause when app fully backgrounded (YouTube policy) |
-| Queue | Next / previous from search results |
-| Progress | Seek bar for stream tracks |
-| Dark UI | GMAX `#050707` theme |
+| Source | Background |
+|--------|------------|
+| Saavn / Audius | Yes (`expo-av`) |
+| **YouTube** | Yes — audio URL resolve → `expo-av` (same as other streams). Embed only if resolve fails. |
 
 ---
 
-## Requirements
+## Phone se APK banana (sirf mobile — computer nahi chahiye)
 
-- Node.js 20+
-- Android phone **or** emulator
-- For APK: Expo account + [EAS](https://expo.dev)
+### Method A — Expo website (sabse aasaan)
 
----
+1. Phone browser me kholo: [https://expo.dev](https://expo.dev) → **Sign up / Log in** (Google se bhi ho sakta hai).
+2. **Create a project** → import / connect **GitHub** repo: `gamxsharma305-png/gmax-android`.
+3. Project open karke **Builds** → **Create a build**.
+4. Platform: **Android** · Profile: **preview** (APK).
+5. Build 10–20 min me complete hota hai → **Download** APK → phone me install.
 
-## Setup (dev)
+> Pehli baar Expo account free tier se Android APK milta hai.
+
+### Method B — Laptop / PC (agar baad me mile)
 
 ```bash
 git clone https://github.com/gamxsharma305-png/gmax-android.git
 cd gmax-android
 npm install
-npx expo start
-```
-
-Install **Expo Go** on phone → scan QR.
-
-### Local native build
-
-```bash
-npx expo prebuild --platform android
-npx expo run:android
-```
-
----
-
-## Build APK (recommended)
-
-```bash
 npm i -g eas-cli
 eas login
 eas build -p android --profile preview
 ```
 
-Download the APK from the Expo dashboard link when the build finishes.
+Link se APK download → phone pe install.
 
-Profiles (`eas.json`):
+### Install tip
 
-- `preview` → **APK** (install on device)
-- `production` → **AAB** (Play Store)
+Android: **Settings → Security → Unknown sources / Install unknown apps** allow karo for your browser/Files app.
+
+### Icon
+
+Agar build me `assets/icon.png` missing error aaye: koi bhi 512×512 PNG ko `assets/icon.png` naam se repo me add karo (GitHub app se phone pe bhi upload ho sakta hai).
+
+---
+
+## Dev test (optional)
+
+```bash
+npm install
+npx expo start
+```
+
+Phone pe **Expo Go** → QR scan.  
+**Note:** Background audio poora tab test karo jab **APK** install ho (Expo Go limited hota hai).
 
 ---
 
 ## Project structure
 
 ```
-App.tsx                     # Search + player UI
-src/api/music.ts            # Saavn + Audius + YouTube search
-src/player/audio.ts         # expo-av background streams
-src/player/YouTubeEmbed.tsx # YouTube iframe player
-app.json                    # Package id, permissions
-eas.json                    # APK / AAB profiles
+App.tsx                     # UI + play logic
+src/api/music.ts            # Search + resolveYouTubeStream()
+src/player/audio.ts         # expo-av background player
+src/player/YouTubeEmbed.tsx # fallback embed only
+app.json / eas.json         # permissions + APK profile
 ```
 
 ---
 
-## Background audio notes
+## YouTube background kaise kaam karta hai
 
-- **Saavn / Audius**: `expo-av` + `staysActiveInBackground` + Android `FOREGROUND_SERVICE_MEDIA_PLAYBACK` → works with screen off.
-- **YouTube**: played with the official embed. Android often stops embed audio when the app is not visible. Prefer Saavn/Audius when you need lock-screen listening.
+1. Search Invidious se video list laata hai.
+2. Play pe `resolveYouTubeStream(videoId)` audio URL nikalta hai.
+3. Woh URL `expo-av` se play hoti hai → **screen off / dusri app** pe bhi chalti rehti hai.
+4. Agar resolve fail ho → purana iframe embed (background weak).
+
+Player me **YT · BG** dikhe to stream mode active hai.
 
 ---
 
 ## Legal
 
-Use lawful stream sources only. YouTube is played via official embed (no stream ripping in this app).
+Public proxies / mirrors change ho sakte hain. Official YouTube app policies apply; personal use ke liye design kiya gaya hai.
