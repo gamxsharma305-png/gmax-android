@@ -1,24 +1,21 @@
-# GMAX Android (Native)
+# GMAX Android — WebView (website UI 1:1)
 
-**React Native / Expo** port of the GMAX music website structure — **not a WebView**.
+Full-screen WebView of the live site:
 
-Same architecture as `gmax-website`:
+**https://gmax-website-seven.vercel.app**
 
-```
-Shell
- ├─ Home / Search / History / Library
- ├─ MiniPlayer
- ├─ NowPlaying (overlay)
- └─ Settings (overlay)
+Same UI as the website. No separate design.
 
-lib/gmax: types, search (Saavn+Audius+YouTube), engine (expo-av)
-store: player, ui (Zustand)
-```
+## Build APK (phone + Expo website)
 
-## Background audio
+1. Open [expo.dev](https://expo.dev) → account **gmax519** → project **gmax**
+2. **Builds** → **Create a build**
+3. Platform: **Android**
+4. Profile: **preview** (APK)
+5. Wait 10–20 min → **Download** → install on phone
 
-`expo-av` + `staysActiveInBackground` + Android media playback foreground service.
+GitHub repo must be linked: `gamxsharma305-png/gmax-android` branch `main`.
 
-## Build APK
+## Background note
 
-Expo → **preview** profile, or `eas build -p android --profile preview`.
+WebView background audio is limited on Android. For stronger background, use the native player build later.
