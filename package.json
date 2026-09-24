@@ -6,9 +6,10 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "prebuild": "expo prebuild",
+    "prebuild": "node scripts/ensure-icon.js && expo prebuild",
     "build:apk": "eas build -p android --profile preview",
-    "eas-build-pre-install": "node scripts/ensure-icon.js"
+    "eas-build-pre-install": "node scripts/ensure-icon.js",
+    "eas-build-post-install": "node scripts/ensure-icon.js"
   },
   "dependencies": {
     "expo": "~52.0.0",
