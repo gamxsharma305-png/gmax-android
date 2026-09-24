@@ -1,35 +1,67 @@
 export const COLORS = {
   background: '#050707',
-  surface: '#0c1014',
-  surfaceElevated: '#12181e',
-  text: '#f0f0f0',
-  textSecondary: '#9ca3af',
-  textMuted: '#6b7280',
-  border: '#1f2937',
-  accent: '#1db954',
-  danger: '#ef4444',
-  white: '#ffffff',
-  black: '#000000',
-} as const;
+  surface: '#090B0B',
+  surfaceLight: '#0D1010',
+  glass: 'rgba(255, 255, 255, 0.05)',
+  surfaceRaised: '#121616',
+  hairline: 'rgba(255, 255, 255, 0.08)',
+  glassBorder: 'rgba(255, 255, 255, 0.1)',
+  
+  text: {
+    primary: '#F0F0F0',
+    secondary: '#888888',
+    muted: '#555555',
+  },
+  
+  accent: {
+    green: '#1DB954',
+    greenGlow: 'rgba(29, 185, 84, 0.15)',
+    red: '#FF4444',
+    redGlow: 'rgba(255, 68, 68, 0.15)',
+  },
+  
+  player: {
+    progressTrack: 'rgba(255, 255, 255, 0.2)',
+    progressFill: '#FFFFFF',
+  }
+};
 
-export const SPACING = {
+export const SIZES = {
+  bottomInset: 150,
   xs: 4,
   sm: 8,
-  md: 12,
-  lg: 16,
-  xl: 24,
-  xxl: 32,
-} as const;
+  md: 16,
+  lg: 24,
+  xl: 32,
+  xxl: 48,
+  xxxl: 64,
+  radius: {
+    sm: 8,
+    md: 16,
+    lg: 24,
+    pill: 999,
+  }
+};
 
-export const RADIUS = {
-  sm: 8,
-  md: 12,
-  lg: 16,
-  full: 999,
-} as const;
-
-export const FONT = {
+export const FONTS = {
   regular: 'System',
   medium: 'System',
   bold: 'System',
-} as const;
+};
+
+export const SHADOWS = {
+  glass: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  ambient: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 4,
+  }
+};
