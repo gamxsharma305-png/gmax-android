@@ -1,6 +1,7 @@
 node_modules/
 .expo/
 dist/
+web-build/
 android/
 ios/
 *.jks
@@ -9,8 +10,8 @@ ios/
 *.key
 *.mobileprovision
 *.orig.*
-web-build/
 .DS_Store
 npm-debug.*
-yarn-debug.*
-yarn-error.*
+*.log
+.env
+.env.*

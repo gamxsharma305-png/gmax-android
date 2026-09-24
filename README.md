@@ -1,32 +1,36 @@
 # GMAX Android (Native)
 
-Native music app for **GMAX** using **Expo (React Native)**.
+Native **GMAX** music app — **Expo (React Native)**.
 
-## Why native?
+Saavn + Audius **direct streams** (true background / lock-screen audio via `expo-av`)  
++ **YouTube** search & in-app play (official embed via `react-native-youtube-iframe`).
 
-Website / PWA cannot keep YouTube iframe audio reliably on the Android home screen.
-This app uses **HTML5-style stream URLs** (Saavn + Audius) with **Expo AV + background audio mode**, so playback can continue when the screen is off or you switch apps.
+> Website repo is separate. This repo is only for the Android app / APK.
 
-### Sources (background-capable)
+---
 
-| Source | Content | Background |
-|--------|---------|------------|
-| **JioSaavn API** | Indian / Bollywood / Punjabi | Yes (direct stream URL) |
-| **Audius** | Phonk, lofi, electronic, indie | Yes (official stream API) |
+## Features
 
-**Not included:** YouTube / YT Music stream extraction (against YouTube ToS). Use official YouTube / YT Music apps for that catalog.
+| Feature | Notes |
+|---------|--------|
+| Search | JioSaavn + Audius + YouTube (Invidious) |
+| Background audio | Saavn / Audius streams — screen off OK |
+| YouTube | In-app embed; may pause when app fully backgrounded (YouTube policy) |
+| Queue | Next / previous from search results |
+| Progress | Seek bar for stream tracks |
+| Dark UI | GMAX `#050707` theme |
 
 ---
 
 ## Requirements
 
 - Node.js 20+
-- Android Studio (SDK + emulator) **or** a physical Android phone
-- Expo CLI (`npx expo`)
+- Android phone **or** emulator
+- For APK: Expo account + [EAS](https://expo.dev)
 
 ---
 
-## Setup
+## Setup (dev)
 
 ```bash
 git clone https://github.com/gamxsharma305-png/gmax-android.git
@@ -35,16 +39,18 @@ npm install
 npx expo start
 ```
 
-Phone: install **Expo Go**, scan QR.
+Install **Expo Go** on phone → scan QR.
 
-### Build APK (development)
+### Local native build
 
 ```bash
 npx expo prebuild --platform android
 npx expo run:android
 ```
 
-### Production APK / AAB (EAS)
+---
+
+## Build APK (recommended)
 
 ```bash
 npm i -g eas-cli
@@ -52,35 +58,35 @@ eas login
 eas build -p android --profile preview
 ```
 
-See [Expo EAS Build](https://docs.expo.dev/build/introduction/).
+Download the APK from the Expo dashboard link when the build finishes.
 
----
+Profiles (`eas.json`):
 
-## Background audio (Android)
-
-Configured in `app.json`:
-
-- `UIBackgroundModes` / Android audio focus via `expo-av`
-- `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_MEDIA_PLAYBACK`
-- `android.permission.WAKE_LOCK`
-
-Player uses `Audio.setAudioModeAsync({ staysActiveInBackground: true, playsInSilentModeIOS: true })`.
+- `preview` → **APK** (install on device)
+- `production` → **AAB** (Play Store)
 
 ---
 
 ## Project structure
 
 ```
-App.tsx              # UI: search + player
-src/api/music.ts     # Saavn + Audius search/resolve
-src/player/audio.ts  # expo-av background player
-app.json             # Android permissions
-package.json
+App.tsx                     # Search + player UI
+src/api/music.ts            # Saavn + Audius + YouTube search
+src/player/audio.ts         # expo-av background streams
+src/player/YouTubeEmbed.tsx # YouTube iframe player
+app.json                    # Package id, permissions
+eas.json                    # APK / AAB profiles
 ```
 
 ---
 
-## Legal note
+## Background audio notes
 
-Use only sources that provide lawful stream URLs for third-party clients.
-Do not add YouTube downloaders / extractors to this project.
+- **Saavn / Audius**: `expo-av` + `staysActiveInBackground` + Android `FOREGROUND_SERVICE_MEDIA_PLAYBACK` → works with screen off.
+- **YouTube**: played with the official embed. Android often stops embed audio when the app is not visible. Prefer Saavn/Audius when you need lock-screen listening.
+
+---
+
+## Legal
+
+Use lawful stream sources only. YouTube is played via official embed (no stream ripping in this app).
