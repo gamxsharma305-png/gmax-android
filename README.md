@@ -1,38 +1,24 @@
-# GMAX Android APK
+# GMAX Android (Native)
 
-**Full 1:1 clone of the GMAX website** inside a native Android shell.
+**React Native / Expo** port of the GMAX music website structure — **not a WebView**.
 
-The app opens your live site in a full-screen WebView:
+Same architecture as `gmax-website`:
 
-**https://gmax-website-seven.vercel.app**
+```
+Shell
+ ├─ Home / Search / History / Library
+ ├─ MiniPlayer
+ ├─ NowPlaying (overlay)
+ └─ Settings (overlay)
 
-Same UI, search, player, settings, queue — whatever is on the website appears in the APK. No separate simplified player.
-
----
-
-## Build APK (Expo)
-
-1. Connect this GitHub repo to Expo project **gmax** (account **gmax519**).
-2. Project ID is already in `app.config.js`.
-3. Expo → **Builds** → **preview** (Android APK).
-
-Or:
-
-```bash
-npm install
-eas build -p android --profile preview
+lib/gmax: types, search (Saavn+Audius+YouTube), engine (expo-av)
+store: player, ui (Zustand)
 ```
 
----
+## Background audio
 
-## Background audio note
+`expo-av` + `staysActiveInBackground` + Android media playback foreground service.
 
-The website’s own player + MediaSession run inside the WebView.  
-Android may still pause WebView media when the app is fully killed; keeping the app in recent apps / not force-stopping helps.  
-Battery: set GMAX to **Unrestricted** in system settings for best results.
+## Build APK
 
----
-
-## Change the site URL
-
-Edit `SITE_URL` in `App.tsx` if the Vercel domain changes.
+Expo → **preview** profile, or `eas build -p android --profile preview`.
