@@ -1,6 +1,6 @@
 {
   "name": "gmax-android",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "main": "expo/AppEntry.js",
   "scripts": {
     "start": "expo start",
@@ -13,13 +13,11 @@
   },
   "dependencies": {
     "expo": "~52.0.0",
-    "expo-av": "~15.0.0",
     "expo-status-bar": "~2.0.0",
     "react": "18.3.1",
     "react-native": "0.76.9",
     "react-native-safe-area-context": "4.12.0",
-    "react-native-webview": "13.12.5",
-    "react-native-youtube-iframe": "^2.3.0"
+    "react-native-webview": "13.12.5"
   },
   "devDependencies": {
     "@babel/core": "^7.25.0",
