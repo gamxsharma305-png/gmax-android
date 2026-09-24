@@ -78,7 +78,7 @@ module.exports = {
   name: "GMAX",
   slug: "gmax",
   owner: "gmax519",
-  version: "1.1.0",
+  version: "2.0.0",
   orientation: "portrait",
   userInterfaceStyle: "dark",
   icon: "./assets/icon.png",
@@ -88,7 +88,7 @@ module.exports = {
   },
   android: {
     package: "com.gmax.player",
-    versionCode: 5,
+    versionCode: 6,
     permissions: [
       "WAKE_LOCK",
       "FOREGROUND_SERVICE",
@@ -107,7 +107,7 @@ module.exports = {
       UIBackgroundModes: ["audio"],
     },
   },
-  plugins: [["expo-av", { microphonePermission: false }]],
+  plugins: [],
   extra: {
     eas: {
       projectId: "d0b9f8bc-3fe4-48a4-97b8-52a2476cd528",
@@ -115,7 +115,7 @@ module.exports = {
   },
   doctor: {
     reactNativeDirectoryCheck: {
-      exclude: ["expo-av", "react-native-youtube-iframe"],
+      exclude: ["react-native-webview"],
       listUnknownPackages: false,
     },
   },
