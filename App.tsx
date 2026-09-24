@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -12,7 +12,22 @@ import {
   View,
 } from "react-native";
 import { searchMusic, type Track } from "./src/api/music";
-import { playTrack, setupAudioMode, togglePlayPause, stopPlayback } from "./src/player/audio";
+import {
+  getPosition,
+  playStreamTrack,
+  seekTo,
+  setupAudioMode,
+  stopPlayback,
+  togglePlayPause,
+} from "./src/player/audio";
+import { YouTubeEmbed } from "./src/player/YouTubeEmbed";
+
+function fmt(sec: number) {
+  if (!Number.isFinite(sec) || sec < 0) return "0:00";
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
 
 export default function App() {
   const [query, setQuery] = useState("");
@@ -21,6 +36,9 @@ export default function App() {
   const [current, setCurrent] = useState<Track | null>(null);
   const [playing, setPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [position, setPosition] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const queueRef = useRef<Track[]>([]);
 
   useEffect(() => {
     void setupAudioMode();
@@ -28,6 +46,18 @@ export default function App() {
       void stopPlayback();
     };
   }, []);
+
+  useEffect(() => {
+    if (!current || current.provider === "youtube" || !playing) return;
+    const id = setInterval(() => {
+      void getPosition().then((p) => {
+        setPosition(p.position);
+        if (p.duration > 0) setDuration(p.duration);
+        setPlaying(p.playing);
+      });
+    }, 500);
+    return () => clearInterval(id);
+  }, [current, playing]);
 
   const onSearch = useCallback(async () => {
     const q = query.trim();
@@ -37,6 +67,7 @@ export default function App() {
     try {
       const list = await searchMusic(q);
       setTracks(list);
+      queueRef.current = list;
       if (!list.length) setError("No tracks found. Try another query.");
     } catch {
       setError("Search failed. Check network.");
@@ -48,12 +79,30 @@ export default function App() {
   const onPlay = useCallback(async (track: Track) => {
     setError(null);
     setCurrent(track);
+    setPosition(0);
+    setDuration(track.duration || 0);
     setPlaying(true);
+
+    await stopPlayback();
+
+    if (track.provider === "youtube" && track.videoId) {
+      return;
+    }
+
     try {
-      await playTrack(track, (st) => {
+      await playStreamTrack(track, (st) => {
         if (!st.isLoaded) return;
         setPlaying(st.isPlaying);
-        if (st.didJustFinish) setPlaying(false);
+        if (st.durationMillis) setDuration(st.durationMillis / 1000);
+        if (st.positionMillis != null) setPosition(st.positionMillis / 1000);
+        if (st.didJustFinish) {
+          setPlaying(false);
+          const q = queueRef.current;
+          const i = q.findIndex((x) => x.id === track.id);
+          if (i >= 0 && i < q.length - 1) {
+            void onPlay(q[i + 1]);
+          }
+        }
       });
     } catch {
       setPlaying(false);
@@ -61,11 +110,50 @@ export default function App() {
     }
   }, []);
 
+  const playNext = useCallback(() => {
+    if (!current) return;
+    const q = queueRef.current;
+    const i = q.findIndex((t) => t.id === current.id);
+    if (i >= 0 && i < q.length - 1) void onPlay(q[i + 1]);
+  }, [current, onPlay]);
+
+  const playPrev = useCallback(() => {
+    if (!current) return;
+    const q = queueRef.current;
+    const i = q.findIndex((t) => t.id === current.id);
+    if (i > 0) void onPlay(q[i - 1]);
+  }, [current, onPlay]);
+
+  const onToggle = useCallback(async () => {
+    if (!current) return;
+    if (current.provider === "youtube") {
+      setPlaying((p) => !p);
+      return;
+    }
+    try {
+      const nowPlaying = await togglePlayPause();
+      setPlaying(nowPlaying);
+    } catch {
+      setError("Playback control failed.");
+    }
+  }, [current]);
+
+  const progress = useMemo(() => {
+    if (!duration || duration <= 0) return 0;
+    return Math.min(1, position / duration);
+  }, [position, duration]);
+
+  const providerBadge = (p: Track["provider"]) => {
+    if (p === "youtube") return "YT";
+    if (p === "saavn") return "SV";
+    return "AU";
+  };
+
   return (
     <SafeAreaView style={styles.root}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle="light-content" backgroundColor="#050707" />
       <Text style={styles.logo}>GMAX</Text>
-      <Text style={styles.sub}>Native · Saavn + Audius · Background audio</Text>
+      <Text style={styles.sub}>Native · Saavn + Audius + YouTube · Background streams</Text>
 
       <View style={styles.searchRow}>
         <TextInput
@@ -82,48 +170,112 @@ export default function App() {
         </Pressable>
       </View>
 
-      {loading ? <ActivityIndicator color="#fff" style={{ marginTop: 24 }} /> : null}
+      {loading ? <ActivityIndicator color="#fff" style={{ marginTop: 20 }} /> : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      {current?.provider === "youtube" && current.videoId ? (
+        <View style={styles.ytBox}>
+          <YouTubeEmbed
+            videoId={current.videoId}
+            playing={playing}
+            onEnded={() => {
+              setPlaying(false);
+              playNext();
+            }}
+            onPlayingChange={setPlaying}
+            height={180}
+          />
+        </View>
+      ) : null}
 
       <FlatList
         data={tracks}
-        keyExtractor={(t) => t.id}
-        contentContainerStyle={{ paddingBottom: 120 }}
-        renderItem={({ item }) => (
-          <Pressable style={styles.row} onPress={() => void onPlay(item)}>
-            {item.image ? (
-              <Image source={{ uri: item.image }} style={styles.art} />
-            ) : (
-              <View style={[styles.art, styles.artFallback]} />
-            )}
-            <View style={{ flex: 1 }}>
-              <Text style={styles.title} numberOfLines={1}>
-                {item.title}
-              </Text>
-              <Text style={styles.artist} numberOfLines={1}>
-                {item.artist} · {item.provider}
-              </Text>
-            </View>
-          </Pressable>
-        )}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={{ paddingBottom: current ? 160 : 24 }}
+        style={{ flex: 1, marginTop: 8 }}
+        renderItem={({ item }) => {
+          const active = current?.id === item.id;
+          return (
+            <Pressable
+              style={[styles.row, active && styles.rowActive]}
+              onPress={() => void onPlay(item)}
+            >
+              {item.image ? (
+                <Image source={{ uri: item.image }} style={styles.art} />
+              ) : (
+                <View style={[styles.art, styles.artPlaceholder]} />
+              )}
+              <View style={styles.meta}>
+                <Text style={styles.title} numberOfLines={1}>
+                  {item.title}
+                </Text>
+                <Text style={styles.artist} numberOfLines={1}>
+                  {item.artist}
+                </Text>
+              </View>
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{providerBadge(item.provider)}</Text>
+              </View>
+            </Pressable>
+          );
+        }}
+        ListEmptyComponent={
+          !loading ? (
+            <Text style={styles.empty}>Search to find Saavn, Audius & YouTube tracks.</Text>
+          ) : null
+        }
       />
 
       {current ? (
-        <View style={styles.bar}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.title} numberOfLines={1}>
-              {current.title}
-            </Text>
-            <Text style={styles.artist} numberOfLines={1}>
-              {current.artist}
-            </Text>
+        <View style={styles.player}>
+          <View style={styles.playerTop}>
+            {current.image ? (
+              <Image source={{ uri: current.image }} style={styles.playerArt} />
+            ) : (
+              <View style={[styles.playerArt, styles.artPlaceholder]} />
+            )}
+            <View style={{ flex: 1 }}>
+              <Text style={styles.playerTitle} numberOfLines={1}>
+                {current.title}
+              </Text>
+              <Text style={styles.playerArtist} numberOfLines={1}>
+                {current.artist} · {providerBadge(current.provider)}
+              </Text>
+            </View>
           </View>
-          <Pressable
-            style={styles.playBtn}
-            onPress={() => void togglePlayPause().then(() => setPlaying((p) => !p))}
-          >
-            <Text style={styles.btnText}>{playing ? "Pause" : "Play"}</Text>
-          </Pressable>
+
+          {current.provider !== "youtube" ? (
+            <View style={styles.progressRow}>
+              <Text style={styles.time}>{fmt(position)}</Text>
+              <Pressable
+                style={styles.barTrack}
+                onPress={(e) => {
+                  const w = e.nativeEvent.locationX;
+                  const ratio = Math.min(1, Math.max(0, w / 220));
+                  const t = ratio * duration;
+                  void seekTo(t);
+                  setPosition(t);
+                }}
+              >
+                <View style={[styles.barFill, { width: `${progress * 100}%` as `${number}%` }]} />
+              </Pressable>
+              <Text style={styles.time}>{fmt(duration)}</Text>
+            </View>
+          ) : (
+            <Text style={styles.ytHint}>YouTube embed · keep app open for best playback</Text>
+          )}
+
+          <View style={styles.controls}>
+            <Pressable style={styles.ctrlBtn} onPress={playPrev}>
+              <Text style={styles.ctrlText}>⏮</Text>
+            </Pressable>
+            <Pressable style={styles.playBtn} onPress={() => void onToggle()}>
+              <Text style={styles.playText}>{playing ? "⏸" : "▶"}</Text>
+            </Pressable>
+            <Pressable style={styles.ctrlBtn} onPress={playNext}>
+              <Text style={styles.ctrlText}>⏭</Text>
+            </Pressable>
+          </View>
         </View>
       ) : null}
     </SafeAreaView>
@@ -133,62 +285,98 @@ export default function App() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#050707", paddingHorizontal: 16 },
   logo: {
-    marginTop: 12,
+    color: "#fff",
     fontSize: 28,
-    fontWeight: "700",
-    color: "#f0f0f0",
-    letterSpacing: 4,
+    fontWeight: "800",
+    letterSpacing: 2,
+    marginTop: 8,
   },
-  sub: { color: "#6b7280", fontSize: 12, marginBottom: 16 },
-  searchRow: { flexDirection: "row", gap: 8, marginBottom: 12 },
+  sub: { color: "#6b7280", fontSize: 12, marginBottom: 12 },
+  searchRow: { flexDirection: "row", gap: 8, alignItems: "center" },
   input: {
     flex: 1,
-    backgroundColor: "#121212",
-    borderRadius: 10,
+    backgroundColor: "#121416",
+    color: "#fff",
+    borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    color: "#fff",
+    fontSize: 16,
     borderWidth: 1,
-    borderColor: "#222",
+    borderColor: "#1f2937",
   },
   btn: {
-    backgroundColor: "#f0f0f0",
-    borderRadius: 10,
+    backgroundColor: "#fff",
+    borderRadius: 12,
     paddingHorizontal: 16,
-    justifyContent: "center",
+    paddingVertical: 12,
   },
   btnText: { color: "#050707", fontWeight: "700" },
-  error: { color: "#f87171", marginVertical: 8 },
+  error: { color: "#f87171", marginTop: 10, fontSize: 13 },
+  empty: { color: "#6b7280", textAlign: "center", marginTop: 40 },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#1f1f1f",
+    borderBottomColor: "#1f2937",
+    gap: 12,
   },
-  art: { width: 48, height: 48, borderRadius: 6, backgroundColor: "#1a1a1a" },
-  artFallback: { backgroundColor: "#222" },
-  title: { color: "#f0f0f0", fontSize: 15, fontWeight: "600" },
+  rowActive: { backgroundColor: "#0c1014" },
+  art: { width: 48, height: 48, borderRadius: 8 },
+  artPlaceholder: { backgroundColor: "#1f2937" },
+  meta: { flex: 1 },
+  title: { color: "#fff", fontSize: 15, fontWeight: "600" },
   artist: { color: "#9ca3af", fontSize: 12, marginTop: 2 },
-  bar: {
+  badge: {
+    backgroundColor: "#1f2937",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  badgeText: { color: "#9ca3af", fontSize: 10, fontWeight: "700" },
+  ytBox: { marginTop: 12, marginBottom: 4 },
+  player: {
     position: "absolute",
     left: 0,
     right: 0,
     bottom: 0,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    padding: 16,
-    paddingBottom: 28,
-    backgroundColor: "#121212",
+    backgroundColor: "#0a0c0e",
     borderTopWidth: 1,
-    borderTopColor: "#222",
+    borderTopColor: "#1f2937",
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 20,
   },
+  playerTop: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 8 },
+  playerArt: { width: 52, height: 52, borderRadius: 8 },
+  playerTitle: { color: "#fff", fontWeight: "700", fontSize: 15 },
+  playerArtist: { color: "#9ca3af", fontSize: 12, marginTop: 2 },
+  progressRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
+  time: { color: "#6b7280", fontSize: 11, width: 36 },
+  barTrack: {
+    flex: 1,
+    height: 4,
+    backgroundColor: "#1f2937",
+    borderRadius: 2,
+    overflow: "hidden",
+  },
+  barFill: { height: 4, backgroundColor: "#fff" },
+  ytHint: { color: "#6b7280", fontSize: 11, marginBottom: 8 },
+  controls: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 28,
+  },
+  ctrlBtn: { padding: 8 },
+  ctrlText: { color: "#fff", fontSize: 22 },
   playBtn: {
-    backgroundColor: "#f0f0f0",
-    borderRadius: 20,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
   },
+  playText: { color: "#050707", fontSize: 22 },
 });
