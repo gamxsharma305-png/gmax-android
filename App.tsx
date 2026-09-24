@@ -11,7 +11,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { searchMusic, type Track } from "./src/api/music";
+import { resolveYouTubeStream, searchMusic, type Track } from "./src/api/music";
 import {
   getPosition,
   playStreamTrack,
@@ -38,6 +38,8 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
+  /** true = using expo-av stream (background OK); false = iframe fallback */
+  const [ytStreamMode, setYtStreamMode] = useState(true);
   const queueRef = useRef<Track[]>([]);
 
   useEffect(() => {
@@ -47,8 +49,10 @@ export default function App() {
     };
   }, []);
 
+  // Progress for any expo-av track (including YouTube audio stream)
   useEffect(() => {
-    if (!current || current.provider === "youtube" || !playing) return;
+    if (!current || !playing) return;
+    if (current.provider === "youtube" && !ytStreamMode) return;
     const id = setInterval(() => {
       void getPosition().then((p) => {
         setPosition(p.position);
@@ -57,7 +61,7 @@ export default function App() {
       });
     }, 500);
     return () => clearInterval(id);
-  }, [current, playing]);
+  }, [current, playing, ytStreamMode]);
 
   const onSearch = useCallback(async () => {
     const q = query.trim();
@@ -82,10 +86,38 @@ export default function App() {
     setPosition(0);
     setDuration(track.duration || 0);
     setPlaying(true);
+    setYtStreamMode(true);
 
     await stopPlayback();
 
+    // YouTube: resolve audio URL → expo-av (background). Embed only if resolve fails.
     if (track.provider === "youtube" && track.videoId) {
+      try {
+        const url = await resolveYouTubeStream(track.videoId);
+        if (url) {
+          setYtStreamMode(true);
+          await playStreamTrack(
+            { ...track, streamUrl: url },
+            (st) => {
+              if (!st.isLoaded) return;
+              setPlaying(st.isPlaying);
+              if (st.durationMillis) setDuration(st.durationMillis / 1000);
+              if (st.positionMillis != null) setPosition(st.positionMillis / 1000);
+              if (st.didJustFinish) {
+                setPlaying(false);
+                const q = queueRef.current;
+                const i = q.findIndex((x) => x.id === track.id);
+                if (i >= 0 && i < q.length - 1) void onPlay(q[i + 1]);
+              }
+            },
+          );
+          return;
+        }
+      } catch {
+        /* fall through to embed */
+      }
+      setYtStreamMode(false);
+      setPlaying(true);
       return;
     }
 
@@ -99,9 +131,7 @@ export default function App() {
           setPlaying(false);
           const q = queueRef.current;
           const i = q.findIndex((x) => x.id === track.id);
-          if (i >= 0 && i < q.length - 1) {
-            void onPlay(q[i + 1]);
-          }
+          if (i >= 0 && i < q.length - 1) void onPlay(q[i + 1]);
         }
       });
     } catch {
@@ -126,7 +156,7 @@ export default function App() {
 
   const onToggle = useCallback(async () => {
     if (!current) return;
-    if (current.provider === "youtube") {
+    if (current.provider === "youtube" && !ytStreamMode) {
       setPlaying((p) => !p);
       return;
     }
@@ -136,7 +166,7 @@ export default function App() {
     } catch {
       setError("Playback control failed.");
     }
-  }, [current]);
+  }, [current, ytStreamMode]);
 
   const progress = useMemo(() => {
     if (!duration || duration <= 0) return 0;
@@ -149,11 +179,15 @@ export default function App() {
     return "AU";
   };
 
+  const showYtEmbed = current?.provider === "youtube" && current.videoId && !ytStreamMode;
+  const showProgress =
+    current && (current.provider !== "youtube" || ytStreamMode);
+
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor="#050707" />
       <Text style={styles.logo}>GMAX</Text>
-      <Text style={styles.sub}>Native · Saavn + Audius + YouTube · Background streams</Text>
+      <Text style={styles.sub}>Native · Saavn + Audius + YouTube BG · Lock-screen audio</Text>
 
       <View style={styles.searchRow}>
         <TextInput
@@ -173,10 +207,10 @@ export default function App() {
       {loading ? <ActivityIndicator color="#fff" style={{ marginTop: 20 }} /> : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      {current?.provider === "youtube" && current.videoId ? (
+      {showYtEmbed ? (
         <View style={styles.ytBox}>
           <YouTubeEmbed
-            videoId={current.videoId}
+            videoId={current!.videoId!}
             playing={playing}
             onEnded={() => {
               setPlaying(false);
@@ -185,6 +219,7 @@ export default function App() {
             onPlayingChange={setPlaying}
             height={180}
           />
+          <Text style={styles.ytHint}>Stream unavailable — embed mode (keep app open)</Text>
         </View>
       ) : null}
 
@@ -221,7 +256,7 @@ export default function App() {
         }}
         ListEmptyComponent={
           !loading ? (
-            <Text style={styles.empty}>Search to find Saavn, Audius & YouTube tracks.</Text>
+            <Text style={styles.empty}>Search Saavn, Audius & YouTube (YT plays in background).</Text>
           ) : null
         }
       />
@@ -240,11 +275,12 @@ export default function App() {
               </Text>
               <Text style={styles.playerArtist} numberOfLines={1}>
                 {current.artist} · {providerBadge(current.provider)}
+                {current.provider === "youtube" && ytStreamMode ? " · BG" : ""}
               </Text>
             </View>
           </View>
 
-          {current.provider !== "youtube" ? (
+          {showProgress ? (
             <View style={styles.progressRow}>
               <Text style={styles.time}>{fmt(position)}</Text>
               <Pressable
@@ -262,7 +298,7 @@ export default function App() {
               <Text style={styles.time}>{fmt(duration)}</Text>
             </View>
           ) : (
-            <Text style={styles.ytHint}>YouTube embed · keep app open for best playback</Text>
+            <Text style={styles.ytHint}>Embed mode — background limited</Text>
           )}
 
           <View style={styles.controls}>
