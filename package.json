@@ -1,8 +1,10 @@
 {
   "name": "gmax-android",
-  "version": "5.0.0",
+  "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
+    "@expo/metro-runtime": "~57.0.15",
+    "@react-native-async-storage/async-storage": "2.2.0",
     "@react-navigation/bottom-tabs": "^7.18.18",
     "@react-navigation/native": "^7.3.18",
     "@react-navigation/native-stack": "^7.18.10",
@@ -35,7 +37,9 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "build:apk": "eas build -p android --profile preview"
+    "eas-build-pre-install": "node scripts/ensure-icon.js",
+    "eas-build-post-install": "node scripts/ensure-icon.js"
   },
-  "private": true
+  "private": true,
+  "license": "GPL-3.0-or-later"
 }
