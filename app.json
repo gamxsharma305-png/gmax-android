@@ -4,42 +4,6 @@
     "slug": "gmax",
     "owner": "gmax519",
     "version": "1.1.0",
-    "orientation": "portrait",
-    "userInterfaceStyle": "dark",
-    "icon": "./assets/icon.png",
-    "splash": {
-      "backgroundColor": "#050707",
-      "resizeMode": "contain"
-    },
-    "android": {
-      "package": "com.gmax.player",
-      "versionCode": 4,
-      "permissions": [
-        "WAKE_LOCK",
-        "FOREGROUND_SERVICE",
-        "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
-        "INTERNET",
-        "ACCESS_NETWORK_STATE"
-      ],
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/icon.png",
-        "backgroundColor": "#050707"
-      }
-    },
-    "ios": {
-      "bundleIdentifier": "com.gmax.player",
-      "infoPlist": {
-        "UIBackgroundModes": ["audio"]
-      }
-    },
-    "plugins": [
-      [
-        "expo-av",
-        {
-          "microphonePermission": false
-        }
-      ]
-    ],
     "extra": {
       "eas": {
         "projectId": "d0b9f8bc-3fe4-48a4-97b8-52a2476cd528"
