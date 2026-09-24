@@ -1,21 +1,21 @@
-# GMAX Android — WebView (website UI 1:1)
+# GMAX Android
 
-Full-screen WebView of the live site:
+Source from your uploaded project zip (NOTE-based music player).
 
-**https://gmax-website-seven.vercel.app**
+## Status
 
-Same UI as the website. No separate design.
+Repo is being aligned to the zip contents. Core configs (`package.json`, `app.json`, `App.tsx`, `eas.json`, plugins) are in place.
 
-## Build APK (phone + Expo website)
+- **Expo project:** gmax519 / gmax  
+- **Project ID:** d0b9f8bc-3fe4-48a4-97b8-52a2476cd528  
+- **Package:** com.gmax.player  
 
-1. Open [expo.dev](https://expo.dev) → account **gmax519** → project **gmax**
-2. **Builds** → **Create a build**
-3. Platform: **Android**
-4. Profile: **preview** (APK)
-5. Wait 10–20 min → **Download** → install on phone
+## Assets
 
-GitHub repo must be linked: `gamxsharma305-png/gmax-android` branch `main`.
+Upload `assets/*.png` from the zip via GitHub app if icons are missing (large binary files).
 
-## Background note
+## Build APK
 
-WebView background audio is limited on Android. For stronger background, use the native player build later.
+Expo → Builds → Android → **preview**
+
+When you ask to edit or add features, changes will be made on this codebase.
