@@ -6,14 +6,13 @@
     "version": "1.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
-    "icon": "./assets/icon.png",
     "splash": {
       "backgroundColor": "#050707",
       "resizeMode": "contain"
     },
     "android": {
       "package": "com.gmax.player",
-      "versionCode": 2,
+      "versionCode": 3,
       "permissions": [
         "WAKE_LOCK",
         "FOREGROUND_SERVICE",
@@ -22,7 +21,6 @@
         "ACCESS_NETWORK_STATE"
       ],
       "adaptiveIcon": {
-        "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#050707"
       }
     },
