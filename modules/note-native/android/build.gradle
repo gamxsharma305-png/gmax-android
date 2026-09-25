@@ -12,15 +12,11 @@ android {
     versionCode 1
     versionName "0.1.0"
   }
-  compileOptions {
-    coreLibraryDesugaringEnabled true
-  }
   lintOptions {
     abortOnError false
   }
 }
 
 dependencies {
-  implementation 'com.github.TeamNewPipe:NewPipeExtractor:v0.26.5'
-  coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
+  // No NewPipe / JitPack — keeps EAS Gradle resolution healthy on SDK 57.
 }

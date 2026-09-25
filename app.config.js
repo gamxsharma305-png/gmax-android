@@ -69,7 +69,7 @@ module.exports = {
   },
   android: {
     package: "com.gmax.player",
-    versionCode: 13,
+    versionCode: 14,
     adaptiveIcon: {
       foregroundImage: "./assets/icon.png",
       backgroundColor: "#050707",
@@ -95,10 +95,9 @@ module.exports = {
       },
     ],
     "expo-asset",
-    "./plugins/withCoreLibraryDesugaring",
+    // No withJitpack / withCoreLibraryDesugaring — they break Expo AAR resolution on Gradle 9
     "./plugins/withAndroidAbis",
     "./plugins/withReleaseSigning",
-    "./plugins/withJitpack",
   ],
   extra: {
     eas: {
