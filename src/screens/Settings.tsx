@@ -1,7 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import {
   Keyboard,
-  Linking,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,7 +9,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronLeft, ExternalLink } from 'lucide-react-native';
+import { ChevronLeft } from 'lucide-react-native';
 import Constants from 'expo-constants';
 import { useNavigation } from '@react-navigation/native';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
@@ -23,10 +22,6 @@ const GENDERS: { value: Gender; label: string }[] = [
   { value: 'unspecified', label: 'Prefer not to say' },
 ];
 
-const REPO_URL = 'https://github.com/SJbuilds04/NOTE';
-const GPL_URL = 'https://www.gnu.org/licenses/gpl-3.0.en.html';
-const NEWPIPE_URL = 'https://github.com/TeamNewPipe/NewPipeExtractor';
-
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
@@ -35,17 +30,13 @@ export default function SettingsScreen() {
   const [name, setName] = useState(profile.name);
 
   const version =
-    Constants.expoConfig?.version ?? Constants.manifest2?.extra?.expoClient?.version ?? '1.0.0';
+    Constants.expoConfig?.version ?? Constants.manifest2?.extra?.expoClient?.version ?? '1.1.0';
 
   const commitName = useCallback(() => {
     const trimmed = name.trim();
     if (trimmed !== profile.name) saveProfile({ name: trimmed });
     Keyboard.dismiss();
   }, [name, profile.name, saveProfile]);
-
-  const open = useCallback((url: string) => {
-    void Linking.openURL(url).catch(() => undefined);
-  }, []);
 
   return (
     <View style={styles.container}>
@@ -66,11 +57,11 @@ export default function SettingsScreen() {
           <View style={styles.avatarRow}>
             <View style={styles.avatar}>
               <Text style={styles.avatarName}>
-                {(profile.name || '?').slice(0, 1).toUpperCase()}
+                {(profile.name || 'G').slice(0, 1).toUpperCase()}
               </Text>
             </View>
             <View style={styles.avatarText}>
-              <Text style={styles.avatarName}>{profile.name || 'Listener'}</Text>
+              <Text style={styles.avatarName}>{profile.name || 'Gmax'}</Text>
               <Text style={styles.avatarMeta}>Local profile on this device</Text>
             </View>
           </View>
@@ -118,33 +109,14 @@ export default function SettingsScreen() {
 
         <Text style={styles.sectionLabel}>ABOUT</Text>
         <View style={styles.card}>
+          <Row label="App" value="Gmax" />
+          <Divider />
           <Row label="Version" value={`${version}`} />
           <Divider />
-          <Row label="Made by" value="SJBUILDS" />
-          <Divider />
-          <LinkRow label="Source code" onPress={() => open(REPO_URL)} />
+          <Row label="Made by" value="Gmax" />
         </View>
 
-        <Text style={styles.sectionLabel}>LICENCE</Text>
-        <View style={styles.card}>
-          <Text style={styles.legalTitle}>NØTE</Text>
-          <Text style={styles.legalBody}>
-            Copyright © 2026 Sanyam Jain.{'\n\n'}
-            Licensed under the GNU General Public License v3 or later.
-          </Text>
-          <LinkRow label="Read GPL-3.0" onPress={() => open(GPL_URL)} />
-        </View>
-
-        <Text style={styles.sectionLabel}>THIRD-PARTY</Text>
-        <View style={styles.card}>
-          <Text style={styles.legalTitle}>NewPipe Extractor</Text>
-          <Text style={styles.legalBody}>
-            Copyright © Team NewPipe and contributors, licensed GPL-3.0-or-later.
-          </Text>
-          <LinkRow label="NewPipeExtractor on GitHub" onPress={() => open(NEWPIPE_URL)} />
-        </View>
-
-        <Text style={styles.footer}>MADE BY SJBUILDS</Text>
+        <Text style={styles.footer}>GMAX</Text>
       </ScrollView>
     </View>
   );
@@ -162,13 +134,6 @@ const Row: React.FC<{ label: string; value: string }> = ({ label, value }) => (
     <Text style={styles.rowLabel}>{label}</Text>
     <Text style={styles.rowValue}>{value}</Text>
   </View>
-);
-
-const LinkRow: React.FC<{ label: string; onPress: () => void }> = ({ label, onPress }) => (
-  <TouchableOpacity style={styles.row} activeOpacity={0.7} onPress={onPress}>
-    <Text style={styles.rowLink}>{label}</Text>
-    <ExternalLink color={COLORS.text.secondary} size={16} />
-  </TouchableOpacity>
 );
 
 const Divider = () => <View style={styles.divider} />;
@@ -267,25 +232,11 @@ const styles = StyleSheet.create({
   },
   rowLabel: { fontFamily: FONTS.regular, fontSize: 15, color: COLORS.text.secondary },
   rowValue: { fontFamily: FONTS.medium, fontSize: 15, color: COLORS.text.primary },
-  rowLink: { fontFamily: FONTS.medium, fontSize: 15, color: COLORS.text.primary },
   divider: { height: 1, backgroundColor: COLORS.glassBorder },
-  legalTitle: {
-    fontFamily: FONTS.medium,
-    fontSize: 16,
-    color: COLORS.text.primary,
-    marginBottom: SIZES.sm,
-  },
-  legalBody: {
-    fontFamily: FONTS.regular,
-    fontSize: 13,
-    lineHeight: 19,
-    color: COLORS.text.secondary,
-    marginBottom: SIZES.sm,
-  },
   footer: {
     fontFamily: FONTS.medium,
-    fontSize: 10,
-    letterSpacing: 3,
+    fontSize: 12,
+    letterSpacing: 4,
     color: COLORS.text.muted,
     textAlign: 'center',
     marginTop: SIZES.xxl,
