@@ -21,7 +21,7 @@ export default function OnboardingScreen() {
     <View style={styles.container}>
       <View style={styles.blob1} />
       <View style={styles.blob2} />
-      
+
       <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} />
 
       <LinearGradient
@@ -38,12 +38,12 @@ export default function OnboardingScreen() {
         </View>
 
         <View style={styles.centerContent}>
-          <Text style={styles.title}>N Ø T E</Text>
+          <Text style={styles.title}>GMAX</Text>
           <Text style={styles.tagline}>YOUR MUSIC. YOUR WAY.</Text>
         </View>
 
         <View style={styles.bottomContent}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.button}
             activeOpacity={0.8}
             onPress={() => navigation.replace('ProfileSetup')}
@@ -53,10 +53,10 @@ export default function OnboardingScreen() {
               <ArrowRight color={COLORS.text.primary} size={20} />
             </View>
           </TouchableOpacity>
-          
+
           <Text style={styles.footerText}>LISTEN FREELY.</Text>
           <Text style={styles.footerText}>LIVE FULLY.</Text>
-          <Text style={styles.madeBy}>MADE BY SJBUILDS</Text>
+          <Text style={styles.madeBy}>GMAX</Text>
         </View>
       </View>
     </View>
@@ -113,7 +113,7 @@ const styles = StyleSheet.create({
   title: {
     fontFamily: FONTS.regular,
     fontSize: 48,
-    letterSpacing: 12,
+    letterSpacing: 8,
     color: COLORS.text.primary,
     marginBottom: SIZES.md,
   },
@@ -169,5 +169,5 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     color: COLORS.text.muted,
     lineHeight: 16,
-  }
+  },
 });

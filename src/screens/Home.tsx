@@ -102,7 +102,7 @@ export default function HomeScreen() {
           <View>
             <Text style={styles.greeting}>{greetingFor(new Date().getHours())}</Text>
             {!!profile.name && <Text style={styles.name}>{profile.name}.</Text>}
-            <Text style={styles.madeBy}>MADE BY SJBUILDS</Text>
+            <Text style={styles.madeBy}>GMAX</Text>
           </View>
           <TouchableOpacity
             style={styles.avatar}
@@ -216,7 +216,7 @@ const styles = StyleSheet.create({
   madeBy: {
     fontFamily: FONTS.medium,
     fontSize: 10,
-    letterSpacing: 2,
+    letterSpacing: 3,
     color: COLORS.text.muted,
     marginTop: 4,
   },

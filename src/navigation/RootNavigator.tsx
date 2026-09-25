@@ -12,7 +12,7 @@ import NowPlayingScreen from '../screens/NowPlaying';
 
 const Stack = createNativeStackNavigator();
 
-const NoteTheme = {
+const GmaxTheme = {
   ...DefaultTheme,
   colors: {
     ...DefaultTheme.colors,
@@ -29,16 +29,16 @@ export const RootNavigator = () => {
   const initialRoute = profile.completed ? 'Main' : 'Onboarding';
 
   return (
-    <NavigationContainer theme={NoteTheme}>
+    <NavigationContainer theme={GmaxTheme}>
       <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
         <Stack.Screen name="Onboarding" component={OnboardingScreen} />
         <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
         <Stack.Screen name="Main" component={TabNavigator} />
         <Stack.Screen name="Playlist" component={PlaylistDetailScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
-        <Stack.Screen 
-          name="NowPlaying" 
-          component={NowPlayingScreen} 
+        <Stack.Screen
+          name="NowPlaying"
+          component={NowPlayingScreen}
           options={{ presentation: 'fullScreenModal' }}
         />
       </Stack.Navigator>
