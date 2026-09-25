@@ -149,6 +149,24 @@ export class Queue {
     else if (from > this.position && to <= this.position) this.position += 1;
   }
 
+  clear(): void {
+    this.tracks = [];
+    this.order = [];
+    this.position = -1;
+    this.contextLabel = '';
+  }
+
+  clearUpcoming(): void {
+    const current = this.current;
+    if (!current) {
+      this.clear();
+      return;
+    }
+    this.tracks = [current];
+    this.order = [0];
+    this.position = 0;
+  }
+
   setShuffle(on: boolean): void {
     if (this.shuffleOn === on) return;
     const currentTrackIndex = this.currentIndex;
@@ -156,6 +174,11 @@ export class Queue {
     this.rebuildOrder(currentTrackIndex >= 0 ? currentTrackIndex : undefined);
     this.position =
       currentTrackIndex >= 0 ? this.order.indexOf(currentTrackIndex) : this.position;
+  }
+
+  toggleShuffle(): boolean {
+    this.setShuffle(!this.shuffleOn);
+    return this.shuffleOn;
   }
 
   cycleRepeat(): RepeatMode {
