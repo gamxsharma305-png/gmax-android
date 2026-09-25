@@ -44,7 +44,8 @@
       "expo-asset",
       "./plugins/withCoreLibraryDesugaring",
       "./plugins/withAndroidAbis",
-      "./plugins/withReleaseSigning"
+      "./plugins/withReleaseSigning",
+      "./plugins/withJitpack"
     ],
     "extra": {
       "eas": {

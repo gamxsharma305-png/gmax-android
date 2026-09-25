@@ -1,6 +1,6 @@
 {
   "name": "gmax-android",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "main": "index.ts",
   "dependencies": {
     "@expo/metro-runtime": "~57.0.15",
@@ -12,6 +12,7 @@
     "expo-asset": "~57.0.17",
     "expo-audio": "~57.0.5",
     "expo-blur": "~57.0.3",
+    "expo-constants": "~18.0.12",
     "expo-dev-client": "~57.0.19",
     "expo-font": "~57.0.4",
     "expo-linear-gradient": "~57.0.2",
@@ -30,7 +31,8 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
-    "typescript": "~6.0.3"
+    "babel-preset-expo": "~14.0.0",
+    "typescript": "~5.9.2"
   },
   "scripts": {
     "start": "expo start",
