@@ -1,62 +1,45 @@
-const {
-  withProjectBuildGradle,
-  withSettingsGradle,
-} = require('expo/config-plugins');
-
-const JITPACK_LINE = "maven { url 'https://www.jitpack.io' }";
+const { withSettingsGradle } = require('expo/config-plugins');
 
 /**
- * Expo SDK 52+ / Gradle 8+ uses dependencyResolutionManagement in settings.gradle.
- * `allprojects {}` is NOT valid on Settings — injecting it crashes evaluation:
- *   Could not find method allprojects() on settings 'GMAX'
+ * NewPipeExtractor is published on JitPack.
+ *
+ * IMPORTANT (Gradle 8+/Expo SDK 52+):
+ * - Only add JitPack inside the EXISTING dependencyResolutionManagement.repositories
+ *   block in settings.gradle (next to google() / mavenCentral()).
+ * - NEVER create an allprojects { repositories { jitpack } } with only JitPack.
+ *   That makes Gradle ignore settings repos and try to download expo modules from
+ *   jitpack.io → 401 Unauthorized / Could not resolve host.exp.exponent:...
  */
-function injectIntoSettings(contents) {
-  if (contents.includes('jitpack.io')) return contents;
-
-  // Preferred: inside dependencyResolutionManagement { repositories { ... } }
-  if (contents.includes('dependencyResolutionManagement')) {
-    // Only touch the repositories block that follows dependencyResolutionManagement
-    return contents.replace(
-      /(dependencyResolutionManagement\s*\{[\s\S]*?repositories\s*\{)/,
-      `$1\n        ${JITPACK_LINE}`,
-    );
-  }
-
-  // Fallback: append a proper settings repositories block (not allprojects)
-  return (
-    contents +
-    `\n\ndependencyResolutionManagement {\n    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)\n    repositories {\n        google()\n        mavenCentral()\n        ${JITPACK_LINE}\n    }\n}\n`
-  );
-}
-
-function injectIntoRootBuildGradle(contents) {
-  if (contents.includes('jitpack.io')) return contents;
-
-  // Classic allprojects { repositories { } } in root build.gradle is fine
-  if (/allprojects\s*\{\s*repositories\s*\{/.test(contents)) {
-    return contents.replace(
-      /(allprojects\s*\{\s*repositories\s*\{)/,
-      `$1\n        ${JITPACK_LINE}`,
-    );
-  }
-
-  // buildscript repositories only — add allprojects repos for project deps
-  return (
-    contents +
-    `\n\nallprojects {\n    repositories {\n        ${JITPACK_LINE}\n    }\n}\n`
-  );
-}
-
 function withJitpack(config) {
-  config = withSettingsGradle(config, (cfg) => {
-    cfg.modResults.contents = injectIntoSettings(cfg.modResults.contents);
+  return withSettingsGradle(config, (cfg) => {
+    let contents = cfg.modResults.contents;
+
+    if (contents.includes('jitpack.io')) {
+      return cfg;
+    }
+
+    if (contents.includes('dependencyResolutionManagement')) {
+      // Insert into the repositories { } that belongs to dependencyResolutionManagement
+      contents = contents.replace(
+        /(dependencyResolutionManagement\s*\{[\s\S]*?repositories\s*\{)/,
+        "$1\n        maven { url 'https://www.jitpack.io' }",
+      );
+    } else {
+      // Very old template — still never use allprojects-only-jitpack
+      contents +=
+        "\n\ndependencyResolutionManagement {\n" +
+        "    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)\n" +
+        "    repositories {\n" +
+        "        google()\n" +
+        "        mavenCentral()\n" +
+        "        maven { url 'https://www.jitpack.io' }\n" +
+        "    }\n" +
+        "}\n";
+    }
+
+    cfg.modResults.contents = contents;
     return cfg;
   });
-  config = withProjectBuildGradle(config, (cfg) => {
-    cfg.modResults.contents = injectIntoRootBuildGradle(cfg.modResults.contents);
-    return cfg;
-  });
-  return config;
 }
 
 module.exports = withJitpack;

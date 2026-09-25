@@ -69,7 +69,7 @@ module.exports = {
   },
   android: {
     package: "com.gmax.player",
-    versionCode: 12,
+    versionCode: 13,
     adaptiveIcon: {
       foregroundImage: "./assets/icon.png",
       backgroundColor: "#050707",
