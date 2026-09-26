@@ -4,11 +4,17 @@ const {
 } = require('expo/config-plugins');
 
 /**
- * JitPack restricted to NewPipe only — never query jitpack for expo.modules.*.
- * Use includeGroup (double-quoted) — includeGroupByRegex + \\ breaks Groovy parser.
+ * Expo autolinking injects project-level maven { url local AAR dirs }.
+ * PREFER_SETTINGS ignores those → expo.modules.* fail to resolve.
+ *
+ * PREFER_PROJECT lets node_modules / local repos work, while settings still
+ * lists google + mavenCentral + JitPack (NewPipe only via content filter).
+ *
+ * Note: RepositoriesMode.REPO_ALLOW_PROJECT does not exist in Gradle.
+ * Correct mode is PREFER_PROJECT.
  */
 const JITPACK_BLOCK = `
-        // GMAX: NewPipeExtractor ONLY — do not resolve expo.modules.* from JitPack
+        // GMAX: NewPipeExtractor only — avoid querying JitPack for expo.modules.*
         maven {
             url "https://jitpack.io"
             content {
@@ -29,36 +35,54 @@ function stripExistingJitpack(contents) {
     );
 }
 
+function forcePreferProject(contents) {
+  // Any existing mode → PREFER_PROJECT so Expo local AAR repos are allowed
+  if (/repositoriesMode\.set\s*\(\s*RepositoriesMode\./.test(contents)) {
+    return contents.replace(
+      /repositoriesMode\.set\s*\(\s*RepositoriesMode\.\w+\s*\)/g,
+      'repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)'
+    );
+  }
+  // Inject mode inside dependencyResolutionManagement if missing
+  return contents.replace(
+    /dependencyResolutionManagement\s*\{/,
+    'dependencyResolutionManagement {\n    repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)'
+  );
+}
+
 function withJitpack(config) {
   return withSettingsGradle(config, (config) => {
     let contents = config.modResults.contents;
+
     contents = stripExistingJitpack(contents);
+    contents = forcePreferProject(contents);
 
-    const drmRepos =
-      /dependencyResolutionManagement\s*\{[\s\S]*?repositories\s*\{/;
-    const match = contents.match(drmRepos);
+    if (!contents.includes('jitpack.io')) {
+      const drmRepos =
+        /dependencyResolutionManagement\s*\{[\s\S]*?repositories\s*\{/;
+      const match = contents.match(drmRepos);
 
-    if (match) {
-      const insertAt = match.index + match[0].length;
-      contents =
-        contents.slice(0, insertAt) + JITPACK_BLOCK + contents.slice(insertAt);
-      config.modResults.contents = contents;
-      return config;
+      if (match) {
+        const insertAt = match.index + match[0].length;
+        contents =
+          contents.slice(0, insertAt) + JITPACK_BLOCK + contents.slice(insertAt);
+      } else {
+        contents +=
+          '\n\n// GMAX: dependency repos\n' +
+          'dependencyResolutionManagement {\n' +
+          '    repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)\n' +
+          '    repositories {\n' +
+          '        google()\n' +
+          '        mavenCentral()\n' +
+          JITPACK_BLOCK +
+          '    }\n' +
+          '}\n';
+      }
     }
 
-    contents +=
-      '\n\n// GMAX: JitPack for NewPipeExtractor only\n' +
-      'dependencyResolutionManagement {\n' +
-      '    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)\n' +
-      '    repositories {\n' +
-      '        google()\n' +
-      '        mavenCentral()\n' +
-      JITPACK_BLOCK +
-      '    }\n' +
-      '}\n';
     config.modResults.contents = contents;
     return config;
   });
 }
 
-module.exports = createRunOncePlugin(withJitpack, 'withJitpack', '3.1.0');
+module.exports = createRunOncePlugin(withJitpack, 'withJitpack', '4.0.0');
