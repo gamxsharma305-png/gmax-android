@@ -250,7 +250,7 @@ const styles = StyleSheet.create({
     minHeight: 64,
     justifyContent: 'center',
   },
-  mixName: { fontFamily: FONTS.semiBold, fontSize: 14, color: COLORS.text.primary },
+  mixName: { fontFamily: FONTS.medium, fontSize: 14, color: COLORS.text.primary },
   mixDesc: { fontFamily: FONTS.regular, fontSize: 11, color: COLORS.text.secondary, marginTop: 2 },
   createRow: {
     flexDirection: 'row',

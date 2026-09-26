@@ -11,6 +11,14 @@ const SAAVN_ENDPOINTS = [
   'https://saavn.dev/api/search/songs',
 ];
 
+function artistName(track: Track): string {
+  const a = track.artist as unknown;
+  if (!a) return '';
+  if (typeof a === 'string') return a;
+  if (typeof a === 'object' && a && 'name' in a) return String((a as { name?: string }).name || '');
+  return '';
+}
+
 function pickStream(downloadUrl: unknown): string {
   if (typeof downloadUrl === 'string' && downloadUrl.startsWith('http')) return downloadUrl;
   if (!Array.isArray(downloadUrl)) return '';
@@ -48,9 +56,9 @@ function norm(s: string): string {
     .trim();
 }
 
-function scoreMatch(track: Track, title: string, artist: string): number {
-  const nt = norm(track.title || '');
-  const na = norm(track.artist || '');
+function scoreMatch(trackTitle: string, trackArtist: string, title: string, artist: string): number {
+  const nt = norm(trackTitle || '');
+  const na = norm(trackArtist || '');
   const rt = norm(title);
   const ra = norm(artist);
   if (!rt) return 0;
@@ -71,7 +79,8 @@ function scoreMatch(track: Track, title: string, artist: string): number {
 }
 
 async function resolveSaavn(track: Track, signal?: AbortSignal): Promise<string | null> {
-  const q = [track.artist, track.title].filter(Boolean).join(' ').trim() || track.title;
+  const artist = artistName(track);
+  const q = [artist, track.title].filter(Boolean).join(' ').trim() || track.title;
   if (!q) return null;
 
   for (const base of SAAVN_ENDPOINTS) {
@@ -86,7 +95,7 @@ async function resolveSaavn(track: Track, signal?: AbortSignal): Promise<string 
       let bestScore = 0;
       for (const item of results) {
         const title = item.name || item.title || '';
-        const artist =
+        const art =
           item.primaryArtists ||
           item.primary_artists ||
           (Array.isArray(item.artists?.primary)
@@ -100,24 +109,24 @@ async function resolveSaavn(track: Track, signal?: AbortSignal): Promise<string 
           item.media_url ||
           '';
         if (!stream) continue;
-        const sc = scoreMatch(track, title, artist);
+        const sc = scoreMatch(track.title, artist, title, art);
         if (sc > bestScore) {
           bestScore = sc;
           bestUrl = stream;
         }
       }
       if (bestUrl && bestScore >= 20) return bestUrl;
-      // weak match still better than nothing
       if (bestUrl && bestScore >= 8) return bestUrl;
     } catch {
-      /* try next endpoint */
+      /* next */
     }
   }
   return null;
 }
 
 async function resolveAudius(track: Track, signal?: AbortSignal): Promise<string | null> {
-  const q = [track.artist, track.title].filter(Boolean).join(' ').trim() || track.title;
+  const artist = artistName(track);
+  const q = [artist, track.title].filter(Boolean).join(' ').trim() || track.title;
   if (!q) return null;
   try {
     const url = `https://discoveryprovider.audius.co/v1/tracks/search?query=${encodeURIComponent(q)}&app_name=${APP}&limit=5`;
@@ -134,10 +143,6 @@ async function resolveAudius(track: Track, signal?: AbortSignal): Promise<string
   return null;
 }
 
-/**
- * Resolves playable HTTPS audio for YouTube (and other) tracks by matching
- * title/artist against Saavn + Audius — same strategy as the GMAX website API.
- */
 export class TitleMatchStreamSource implements StreamSource {
   readonly id = 'title-match';
 
@@ -148,7 +153,6 @@ export class TitleMatchStreamSource implements StreamSource {
   async resolve(track: Track, signal?: AbortSignal): Promise<ResolvedStream> {
     if (signal?.aborted) throw appError('timeout');
 
-    // Prefer Saavn (direct AAC CDN — works on mobile)
     const saavn = await resolveSaavn(track, signal);
     if (saavn) {
       return {
