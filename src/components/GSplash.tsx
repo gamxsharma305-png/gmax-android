@@ -48,7 +48,6 @@ type Props = {
  * letter G path draws in → accent bar → title fades → scale out.
  */
 export function GSplash({ onDone, minMs = 2800 }: Props) {
-  const [phase, setPhase] = useState<'draw' | 'brand' | 'out'>('draw');
   const draw = useRef(new Animated.Value(0)).current;
   const guideOp = useRef(new Animated.Value(0)).current;
   const accentOp = useRef(new Animated.Value(0)).current;
@@ -66,7 +65,6 @@ export function GSplash({ onDone, minMs = 2800 }: Props) {
   };
 
   useEffect(() => {
-    // Guide ring fade in (0.6s)
     Animated.timing(guideOp, {
       toValue: 1,
       duration: 600,
@@ -74,7 +72,6 @@ export function GSplash({ onDone, minMs = 2800 }: Props) {
       easing: Easing.out(Easing.ease),
     }).start();
 
-    // Path draw: 1.35s, delay 0.15s, cubic-bezier(0.4,0,0.2,1)
     Animated.timing(draw, {
       toValue: 1,
       duration: 1350,
@@ -83,7 +80,6 @@ export function GSplash({ onDone, minMs = 2800 }: Props) {
       easing: Easing.bezier(0.4, 0, 0.2, 1),
     }).start();
 
-    // Accent bar at ~1.2s
     Animated.parallel([
       Animated.timing(accentOp, {
         toValue: 1,
@@ -102,7 +98,6 @@ export function GSplash({ onDone, minMs = 2800 }: Props) {
     ]).start();
 
     const t1 = setTimeout(() => {
-      setPhase('brand');
       Animated.parallel([
         Animated.timing(copyOp, {
           toValue: 1,
@@ -120,7 +115,6 @@ export function GSplash({ onDone, minMs = 2800 }: Props) {
     }, 1400);
 
     const t2 = setTimeout(() => {
-      setPhase('out');
       Animated.parallel([
         Animated.timing(outOp, {
           toValue: 0,
@@ -165,24 +159,10 @@ export function GSplash({ onDone, minMs = 2800 }: Props) {
           },
         ]}
       >
-        {/* Soft design-tool grid behind the G */}
         <View style={styles.grid} pointerEvents="none" />
 
         <View style={styles.stage}>
-          <View
-            style={[
-              styles.svgWrap,
-              {
-                width: svgSize,
-                height: svgSize,
-                shadowColor: '#1DB954',
-                shadowOpacity: 0.25,
-                shadowRadius: 24,
-                shadowOffset: { width: 0, height: 0 },
-                elevation: 8,
-              },
-            ]}
-          >
+          <View style={[styles.svgWrap, { width: svgSize, height: svgSize }]}>
             <Svg width={svgSize} height={svgSize} viewBox="0 0 120 120">
               <Defs>
                 <LinearGradient id="gmaxGStroke" x1="24" y1="22" x2="92" y2="96">
@@ -218,11 +198,7 @@ export function GSplash({ onDone, minMs = 2800 }: Props) {
                 strokeDashoffset={strokeDashoffset as unknown as number}
               />
 
-              <AnimatedG
-                opacity={accentOp}
-                origin="77, 58"
-                scaleX={accentScale}
-              >
+              <AnimatedG opacity={accentOp} origin="77, 58" scaleX={accentScale}>
                 <Path d={ACCENT_PATH} fill="url(#gmaxGFill)" />
               </AnimatedG>
             </Svg>
@@ -254,7 +230,6 @@ const styles = StyleSheet.create({
     zIndex: 100,
     alignItems: 'center',
     justifyContent: 'center',
-    // radial-ish: deep center green-black like website
     backgroundColor: '#050707',
   },
   grid: {
@@ -264,11 +239,9 @@ const styles = StyleSheet.create({
     top: '38%',
     alignSelf: 'center',
     marginTop: -110,
-    opacity: 0.7,
-    // approximate soft grid
+    opacity: 0.55,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.04)',
-    backgroundColor: 'transparent',
+    borderColor: 'rgba(255,255,255,0.06)',
   },
   stage: {
     alignItems: 'center',
@@ -282,10 +255,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   name: {
-    fontFamily: FONTS.semiBold ?? FONTS.bold,
+    fontFamily: FONTS.bold,
     fontSize: 32,
     fontWeight: '600',
-    letterSpacing: 0.28 * 16, // ~0.28em
+    letterSpacing: 4.5,
     color: COLORS.text.primary,
   },
   tag: {
@@ -293,7 +266,7 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.medium,
     fontSize: 10,
     fontWeight: '500',
-    letterSpacing: 0.32 * 10,
+    letterSpacing: 3.2,
     color: COLORS.text.muted,
     textTransform: 'uppercase',
   },
@@ -302,7 +275,7 @@ const styles = StyleSheet.create({
     bottom: 28,
     fontFamily: FONTS.medium,
     fontSize: 10,
-    letterSpacing: 0.2 * 10,
+    letterSpacing: 2,
     color: 'rgba(255,255,255,0.28)',
     textTransform: 'uppercase',
   },
