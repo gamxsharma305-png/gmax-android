@@ -60,7 +60,7 @@ export default function LibraryScreen() {
           playTrack(tracks[0], { tracks, label: genre.name });
         }
       } catch {
-        // ignore — user can retry
+        // ignore
       } finally {
         setLoadingGenre(null);
       }
@@ -166,15 +166,13 @@ export default function LibraryScreen() {
         )}
       />
 
-      {currentTrack ? (
-        <MiniPlayer
-          track={currentTrack}
-          isPlaying={isPlaying}
-          isLoading={isLoading}
-          onToggle={togglePlayPause}
-          onOpen={() => navigation.navigate('NowPlaying' as never)}
-        />
-      ) : null}
+      <MiniPlayer
+        track={currentTrack}
+        isPlaying={isPlaying}
+        isLoading={isLoading}
+        onPlayPause={togglePlayPause}
+        onPress={() => navigation.navigate('NowPlaying' as never)}
+      />
       <StatusBarScrim />
     </View>
   );
