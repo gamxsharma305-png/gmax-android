@@ -70,33 +70,31 @@ class NoteNativeModule : Module() {
         return fail("no_audio_stream", "No audio stream found for this video")
       }
 
-      val best = audioStreams.maxWithOrNull(
-        compareBy<AudioStream> { stream ->
+      // Prefer m4a/mp4, then highest bitrate
+      val best = audioStreams.sortedWith(
+        compareByDescending<AudioStream> { stream ->
           val name = stream.format?.name?.lowercase() ?: ""
           when {
             "m4a" in name || "mp4" in name -> 2
             "webm" in name -> 1
             else -> 0
           }
-        }.thenBy { it.averageBitrate }
-      ) ?: audioStreams.maxByOrNull { it.averageBitrate }
+        }.thenByDescending { it.averageBitrate }
+      ).first()
 
-      val streamUrl = best?.url
+      val streamUrl = best.url
       if (streamUrl.isNullOrBlank()) {
         return fail("no_audio_stream", "Audio stream URL empty")
       }
 
-      val formatName = best?.format?.name?.lowercase() ?: ""
-      val mime = when {
-        "webm" in formatName -> "audio/webm"
-        else -> "audio/mp4"
-      }
+      val formatName = best.format?.name?.lowercase() ?: ""
+      val mime = if ("webm" in formatName) "audio/webm" else "audio/mp4"
 
       mapOf(
         "ok" to true,
         "url" to streamUrl,
         "mimeType" to mime,
-        "bitrate" to (best?.averageBitrate ?: 0),
+        "bitrate" to best.averageBitrate,
         "durationSeconds" to info.duration.toDouble(),
         "title" to (info.name ?: ""),
         "uploader" to (info.uploaderName ?: ""),
