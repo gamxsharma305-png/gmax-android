@@ -7,18 +7,17 @@ import {
   TouchableOpacity,
   TextInput,
   Image,
-  ScrollView,
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Plus, Heart, ListMusic, Radio } from 'lucide-react-native';
+import { Plus, Heart, ListMusic, X } from 'lucide-react-native';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { MiniPlayer } from '../components/player/MiniPlayer';
 import { StatusBarScrim } from '../components/common/StatusBarScrim';
 import { useLibrary } from '../hooks/useLibrary';
 import { usePlayer } from '../hooks/usePlayer';
 import { useNavigation } from '@react-navigation/native';
-import { AUTO_GENRE_PLAYLISTS } from '../data/catalog';
+import { AUTO_PLAYLISTS } from '../data/catalog';
 import { MusicService } from '../services/MusicService';
 
 export default function LibraryScreen() {
@@ -30,6 +29,7 @@ export default function LibraryScreen() {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [loadingGenre, setLoadingGenre] = useState<string | null>(null);
+  const [autoError, setAutoError] = useState<string | null>(null);
 
   const ordered = useMemo(
     () => [...playlists].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0)),
@@ -49,23 +49,34 @@ export default function LibraryScreen() {
     openPlaylist(p.id);
   };
 
-  const playAutoGenre = useCallback(
-    async (genre: (typeof AUTO_GENRE_PLAYLISTS)[0]) => {
+  const playAutoMix = useCallback(
+    async (mix: (typeof AUTO_PLAYLISTS)[0], save: boolean) => {
       if (loadingGenre) return;
-      setLoadingGenre(genre.id);
+      setAutoError(null);
+      setLoadingGenre(mix.id);
       try {
-        const results = await MusicService.search(genre.query, { limit: 30 });
+        const results = await MusicService.search(mix.query, { limit: 25 });
         const tracks = results.tracks ?? [];
-        if (tracks.length) {
-          playTrack(tracks[0], { tracks, label: genre.name });
+        if (!tracks.length) {
+          setAutoError('No songs found for this mix. Try again.');
+          return;
         }
+        if (save) {
+          const existing = playlists.find((p) => p.name === mix.name);
+          if (existing) openPlaylist(existing.id);
+          else {
+            const p = createPlaylist(mix.name, { tracks, description: mix.description });
+            openPlaylist(p.id);
+          }
+        }
+        playTrack(tracks[0], { tracks, label: mix.name });
       } catch {
-        // ignore
+        setAutoError('Could not load mix. Check network.');
       } finally {
         setLoadingGenre(null);
       }
     },
-    [loadingGenre, playTrack]
+    [loadingGenre, playTrack, playlists, createPlaylist]
   );
 
   const data = [
@@ -78,12 +89,49 @@ export default function LibraryScreen() {
     })),
   ];
 
+  const ListHeader = (
+    <>
+      <Text style={styles.sectionLabel}>AUTO MIXES</Text>
+      <Text style={styles.hint}>Tap to play · long-press to save in library</Text>
+      {autoError ? <Text style={styles.error}>{autoError}</Text> : null}
+      <View style={styles.mixGrid}>
+        {AUTO_PLAYLISTS.map((g) => (
+          <TouchableOpacity
+            key={g.id}
+            style={[styles.mixCard, { borderLeftColor: g.color }]}
+            onPress={() => void playAutoMix(g, false)}
+            onLongPress={() => void playAutoMix(g, true)}
+            activeOpacity={0.75}
+          >
+            {loadingGenre === g.id ? (
+              <ActivityIndicator size="small" color={g.color} />
+            ) : (
+              <>
+                <Text style={styles.mixName} numberOfLines={1}>
+                  {g.name}
+                </Text>
+                <Text style={styles.mixDesc} numberOfLines={1}>
+                  {g.description}
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+        ))}
+      </View>
+      <Text style={[styles.sectionLabel, { marginTop: SIZES.md }]}>YOUR PLAYLISTS</Text>
+    </>
+  );
+
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + SIZES.lg }]}>
-        <Text style={styles.title}>Library</Text>
-        <TouchableOpacity onPress={() => setCreating((v) => !v)}>
-          <Plus color={COLORS.text.primary} size={24} />
+        <Text style={styles.title}>Your Library</Text>
+        <TouchableOpacity onPress={() => setCreating((v) => !v)} hitSlop={12}>
+          {creating ? (
+            <X color={COLORS.text.primary} size={24} />
+          ) : (
+            <Plus color={COLORS.text.primary} size={24} />
+          )}
         </TouchableOpacity>
       </View>
 
@@ -104,36 +152,10 @@ export default function LibraryScreen() {
         </View>
       )}
 
-      <Text style={styles.sectionLabel}>AUTO PLAYLISTS</Text>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.genreRow}
-      >
-        {AUTO_GENRE_PLAYLISTS.map((g) => (
-          <TouchableOpacity
-            key={g.id}
-            style={[
-              styles.genreChip,
-              { borderColor: g.color + '66', backgroundColor: g.color + '22' },
-            ]}
-            onPress={() => void playAutoGenre(g)}
-            activeOpacity={0.8}
-          >
-            {loadingGenre === g.id ? (
-              <ActivityIndicator size="small" color={g.color} />
-            ) : (
-              <Radio size={14} color={g.color} />
-            )}
-            <Text style={[styles.genreText, { color: g.color }]}>{g.name}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      <Text style={styles.sectionLabel}>YOUR PLAYLISTS</Text>
       <FlatList
         data={data}
         keyExtractor={(item) => item.id}
+        ListHeaderComponent={ListHeader}
         contentContainerStyle={{
           paddingHorizontal: SIZES.md,
           paddingBottom: currentTrack ? 100 : insets.bottom + 24,
@@ -193,25 +215,43 @@ const styles = StyleSheet.create({
     fontSize: 10,
     letterSpacing: 2,
     color: COLORS.text.muted,
-    marginHorizontal: SIZES.md,
-    marginTop: SIZES.sm,
+    marginBottom: 6,
+  },
+  hint: {
+    fontFamily: FONTS.regular,
+    fontSize: 12,
+    color: COLORS.text.muted,
     marginBottom: SIZES.sm,
   },
-  genreRow: {
-    paddingHorizontal: SIZES.md,
-    gap: 8,
-    paddingBottom: SIZES.sm,
+  error: {
+    fontFamily: FONTS.regular,
+    fontSize: 12,
+    color: '#e07a5f',
+    marginBottom: 8,
   },
-  genreChip: {
+  mixGrid: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 20,
-    borderWidth: 1,
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: SIZES.sm,
   },
-  genreText: { fontFamily: FONTS.medium, fontSize: 13 },
+  mixCard: {
+    width: '48%',
+    flexGrow: 1,
+    minWidth: '45%',
+    maxWidth: '48%',
+    backgroundColor: COLORS.surfaceRaised,
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderLeftWidth: 3,
+    borderWidth: 1,
+    borderColor: COLORS.glassBorder,
+    minHeight: 64,
+    justifyContent: 'center',
+  },
+  mixName: { fontFamily: FONTS.semiBold, fontSize: 14, color: COLORS.text.primary },
+  mixDesc: { fontFamily: FONTS.regular, fontSize: 11, color: COLORS.text.secondary, marginTop: 2 },
   createRow: {
     flexDirection: 'row',
     paddingHorizontal: SIZES.md,

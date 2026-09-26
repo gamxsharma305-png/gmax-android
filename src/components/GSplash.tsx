@@ -1,46 +1,88 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, Text, View } from 'react-native';
+import { Animated, StyleSheet, Text, View, Pressable } from 'react-native';
+import Svg, { Circle, Path, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { COLORS, FONTS } from '../constants/theme';
 
-/** Brief GMAX logo intro — mirrors website open animation. */
+const AnimatedPath = Animated.createAnimatedComponent(Path);
+
+/** Website-style G path draw splash for GMAX. */
 export function GSplash({ onDone }: { onDone: () => void }) {
-  const scale = useRef(new Animated.Value(0.4)).current;
-  const opacity = useRef(new Animated.Value(0)).current;
+  const progress = useRef(new Animated.Value(0)).current;
+  const brandOp = useRef(new Animated.Value(0)).current;
   const fadeOut = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     Animated.sequence([
-      Animated.parallel([
-        Animated.spring(scale, {
-          toValue: 1,
-          friction: 5,
-          tension: 80,
-          useNativeDriver: true,
-        }),
-        Animated.timing(opacity, {
-          toValue: 1,
-          duration: 400,
-          useNativeDriver: true,
-        }),
-      ]),
-      Animated.delay(700),
+      Animated.timing(progress, {
+        toValue: 1,
+        duration: 1400,
+        useNativeDriver: false,
+      }),
+      Animated.timing(brandOp, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+      Animated.delay(600),
       Animated.timing(fadeOut, {
         toValue: 0,
-        duration: 350,
+        duration: 400,
         useNativeDriver: true,
       }),
     ]).start(() => onDone());
-  }, [fadeOut, onDone, opacity, scale]);
+  }, [brandOp, fadeOut, onDone, progress]);
+
+  const strokeDashoffset = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [280, 0],
+  });
 
   return (
-    <Animated.View style={[styles.wrap, { opacity: fadeOut }]}>
-      <Animated.View style={{ transform: [{ scale }], opacity }}>
-        <View style={styles.badge}>
-          <Text style={styles.letter}>G</Text>
+    <Pressable onPress={onDone} style={StyleSheet.absoluteFill}>
+      <Animated.View style={[styles.wrap, { opacity: fadeOut }]}>
+        <View style={styles.stage}>
+          <Svg width={120} height={120} viewBox="0 0 120 120">
+            <Defs>
+              <LinearGradient id="gmaxGStroke" x1="0" y1="0" x2="1" y2="1">
+                <Stop offset="0" stopColor="#1DB954" />
+                <Stop offset="1" stopColor="#a7f3d0" />
+              </LinearGradient>
+            </Defs>
+            <Circle
+              cx="60"
+              cy="60"
+              r="46"
+              stroke="rgba(255,255,255,0.12)"
+              strokeWidth="1"
+              strokeDasharray="4 6"
+              fill="none"
+            />
+            <AnimatedPath
+              d="M 88 42
+                 C 82 28 72 22 58 22
+                 C 38 22 24 36 24 58
+                 C 24 80 38 96 60 96
+                 C 76 96 88 86 92 72
+                 L 68 72
+                 M 92 72
+                 L 92 58
+                 L 62 58"
+              stroke="url(#gmaxGStroke)"
+              strokeWidth="7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill="none"
+              strokeDasharray="280"
+              strokeDashoffset={strokeDashoffset as unknown as number}
+            />
+          </Svg>
+          <Animated.Text style={[styles.brand, { opacity: brandOp }]}>GMAX</Animated.Text>
+          <Animated.Text style={[styles.tag, { opacity: brandOp }]}>
+            YOUR MUSIC. YOUR WAY.
+          </Animated.Text>
         </View>
-        <Text style={styles.brand}>GMAX</Text>
       </Animated.View>
-    </Animated.View>
+    </Pressable>
   );
 }
 
@@ -52,28 +94,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 100,
   },
-  badge: {
-    width: 88,
-    height: 88,
-    borderRadius: 28,
-    backgroundColor: '#0d1a14',
-    borderWidth: 1.5,
-    borderColor: '#1DB954',
-    alignItems: 'center',
-    justifyContent: 'center',
-    alignSelf: 'center',
-  },
-  letter: {
-    fontFamily: FONTS.bold,
-    fontSize: 48,
-    color: '#1DB954',
-  },
+  stage: { alignItems: 'center' },
   brand: {
-    marginTop: 16,
+    marginTop: 18,
     fontFamily: FONTS.bold,
     fontSize: 22,
     letterSpacing: 6,
     color: COLORS.text.primary,
-    textAlign: 'center',
+  },
+  tag: {
+    marginTop: 8,
+    fontFamily: FONTS.medium,
+    fontSize: 11,
+    letterSpacing: 2,
+    color: COLORS.text.muted,
   },
 });
