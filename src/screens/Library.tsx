@@ -25,7 +25,7 @@ export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { playlists, likedPlaylist, createPlaylist } = useLibrary();
-  const { currentTrack, isPlaying, isLoading, togglePlayPause, playTracks } = usePlayer();
+  const { currentTrack, isPlaying, isLoading, togglePlayPause, playTrack } = usePlayer();
 
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
@@ -56,12 +56,8 @@ export default function LibraryScreen() {
       try {
         const results = await MusicService.search(genre.query, { limit: 30 });
         const tracks = results.tracks ?? [];
-        if (tracks.length && playTracks) {
-          await playTracks(tracks, 0);
-        } else if (tracks.length) {
-          // Fallback: create playlist and open
-          const p = createPlaylist(genre.name, { tracks, description: 'Auto playlist' });
-          openPlaylist(p.id);
+        if (tracks.length) {
+          playTrack(tracks[0], { tracks, label: genre.name });
         }
       } catch {
         // ignore — user can retry
@@ -69,7 +65,7 @@ export default function LibraryScreen() {
         setLoadingGenre(null);
       }
     },
-    [loadingGenre, playTracks, createPlaylist]
+    [loadingGenre, playTrack]
   );
 
   const data = [
@@ -117,7 +113,10 @@ export default function LibraryScreen() {
         {AUTO_GENRE_PLAYLISTS.map((g) => (
           <TouchableOpacity
             key={g.id}
-            style={[styles.genreChip, { borderColor: g.color + '66', backgroundColor: g.color + '22' }]}
+            style={[
+              styles.genreChip,
+              { borderColor: g.color + '66', backgroundColor: g.color + '22' },
+            ]}
             onPress={() => void playAutoGenre(g)}
             activeOpacity={0.8}
           >
@@ -256,7 +255,12 @@ const styles = StyleSheet.create({
   },
   coverImg: { width: '100%', height: '100%' },
   rowTitle: { fontFamily: FONTS.medium, fontSize: 16, color: COLORS.text.primary },
-  rowMeta: { fontFamily: FONTS.regular, fontSize: 12, color: COLORS.text.secondary, marginTop: 2 },
+  rowMeta: {
+    fontFamily: FONTS.regular,
+    fontSize: 12,
+    color: COLORS.text.secondary,
+    marginTop: 2,
+  },
   empty: {
     fontFamily: FONTS.regular,
     fontSize: 14,

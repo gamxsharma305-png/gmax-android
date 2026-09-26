@@ -1,14 +1,17 @@
-import React, { useEffect } from 'react';
-import { StyleSheet, View, Platform } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { PlayerProvider } from './src/hooks/usePlayer';
 import { LibraryProvider } from './src/hooks/useLibrary';
 import { COLORS } from './src/constants/theme';
+import { GSplash } from './src/components/GSplash';
 import { getPlatformInfo, isNoteNativeAvailable } from './modules/note-native';
 
 export default function App() {
+  const [showSplash, setShowSplash] = useState(true);
+
   useEffect(() => {
     if (__DEV__) {
       console.log(
@@ -28,6 +31,7 @@ export default function App() {
             <View style={styles.appContainer}>
               <RootNavigator />
               <StatusBar style="light" />
+              {showSplash ? <GSplash onDone={() => setShowSplash(false)} /> : null}
             </View>
           </View>
         </PlayerProvider>
@@ -39,19 +43,10 @@ export default function App() {
 const styles = StyleSheet.create({
   webWrapper: {
     flex: 1,
-    backgroundColor: '#000000',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: COLORS.background,
   },
   appContainer: {
     flex: 1,
-    width: '100%',
-    maxWidth: Platform.OS === 'web' ? 420 : '100%',
-    maxHeight: Platform.OS === 'web' ? 900 : '100%',
     backgroundColor: COLORS.background,
-    overflow: 'hidden',
-    borderWidth: Platform.OS === 'web' ? 1 : 0,
-    borderColor: 'rgba(255,255,255,0.1)',
-    borderRadius: Platform.OS === 'web' ? 40 : 0,
   },
 });
