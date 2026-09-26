@@ -241,9 +241,15 @@ export class StreamResolverChain {
 
 export const endpointSource = new EndpointStreamSource();
 
-/** Order: direct URL → Saavn/Audius title match → native stub → optional Invidious/Piped */
+/**
+ * Order for YouTube background play:
+ * 1) Direct audioUrl (Saavn/Audius/iTunes) — expo-audio + background
+ * 2) Native NewPipe (real YouTube audio URL + User-Agent) — expo-audio + background
+ * 3) Title match Saavn/Audius fallback
+ * 4) Public Invidious/Piped endpoints (often down)
+ */
 export const streamResolver = new StreamResolverChain()
   .use(new DirectStreamSource())
-  .use(new TitleMatchStreamSource())
   .use(new NativeStreamSource())
+  .use(new TitleMatchStreamSource())
   .use(endpointSource);

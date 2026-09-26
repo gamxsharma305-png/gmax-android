@@ -4,19 +4,34 @@ plugins {
 }
 
 group = 'expo.modules.notenative'
-version = '0.1.0'
+version = '0.2.0'
 
 android {
   namespace "expo.modules.notenative"
   defaultConfig {
-    versionCode 1
-    versionName "0.1.0"
+    versionCode 2
+    versionName "0.2.0"
   }
   lintOptions {
     abortOnError false
   }
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+  kotlinOptions {
+    jvmTarget = "17"
+  }
+}
+
+repositories {
+  google()
+  mavenCentral()
+  maven { url 'https://jitpack.io' }
 }
 
 dependencies {
-  // No NewPipe / JitPack — keeps EAS Gradle resolution healthy on SDK 57.
+  // Native YouTube stream extraction (no JS runtime)
+  implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.24.3")
+  implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
