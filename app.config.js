@@ -1,14 +1,11 @@
 const fs = require("fs");
 const path = require("path");
 
-// Prefer icon written by scripts/ensure-icon.js (user image from postimg).
-// Only create a tiny placeholder if missing so Expo config resolves.
 try {
   const dir = path.join(__dirname, "assets");
   fs.mkdirSync(dir, { recursive: true });
   const p = path.join(dir, "icon.png");
   if (!fs.existsSync(p) || fs.statSync(p).size < 100) {
-    // Minimal 1x1 dark PNG so config load never fails; EAS pre-install replaces it.
     const minimal = Buffer.from(
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
       "base64"
@@ -34,7 +31,7 @@ module.exports = {
   },
   android: {
     package: "com.gmax.player",
-    versionCode: 18,
+    versionCode: 19,
     adaptiveIcon: {
       foregroundImage: "./assets/icon.png",
       backgroundColor: "#050707",
