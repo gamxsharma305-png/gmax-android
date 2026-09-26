@@ -122,6 +122,29 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       lastAttempt.current = { track, position: options.startPosition ?? 0 };
 
       try {
+        // 1) Prefer real audio stream (Saavn / Audius / direct)
+        let stream: Awaited<ReturnType<typeof MusicService.resolveStream>> | null = null;
+        try {
+          stream = await MusicService.resolveStream(track, controller.signal);
+        } catch {
+          stream = null;
+        }
+        if (id !== loadId.current) return;
+
+        if (stream?.url) {
+          youtubeController.stop();
+          playMode.current = 'audio';
+          await playbackEngine.load(track, stream, options);
+          if (id !== loadId.current) return;
+          setIsLoading(false);
+          autoSkips.current = 0;
+          loadingTrackId.current = null;
+          LibraryService.recordPlay(track);
+          preloader.schedule(queueRef.current.peekNext());
+          return;
+        }
+
+        // 2) YouTube embed when stream not found
         if (track.provider === 'youtube' && track.sourceId) {
           playbackEngine.stop();
           playMode.current = 'youtube';
@@ -129,41 +152,18 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             autoPlay: options.autoPlay !== false,
             startAt: options.startPosition ?? 0,
           });
-        } else {
-          const stream = await MusicService.resolveStream(track, controller.signal);
-          if (id !== loadId.current) return;
-          youtubeController.stop();
-          playMode.current = 'audio';
-          await playbackEngine.load(track, stream, options);
-          if (id !== loadId.current) return;
+          LibraryService.recordPlay(track);
+          preloader.schedule(queueRef.current.peekNext());
+          return;
         }
 
-        if (id !== loadId.current) return;
-        setIsLoading(false);
-        autoSkips.current = 0;
-        loadingTrackId.current = null;
-        LibraryService.recordPlay(track);
-        preloader.schedule(queueRef.current.peekNext());
+        throw appErrorWithMessage(
+          'source_unavailable',
+          'No playback source available for this track.',
+          'no stream and no youtube id'
+        );
       } catch (e) {
         if (id !== loadId.current) return;
-
-        if (track.provider === 'youtube' && track.sourceId) {
-          try {
-            playbackEngine.stop();
-            playMode.current = 'youtube';
-            youtubeController.load(track.sourceId, {
-              autoPlay: options.autoPlay !== false,
-              startAt: options.startPosition ?? 0,
-            });
-            setIsLoading(false);
-            loadingTrackId.current = null;
-            autoSkips.current = 0;
-            LibraryService.recordPlay(track);
-            return;
-          } catch {
-            /* fall through */
-          }
-        }
 
         setIsLoading(false);
         loadingTrackId.current = null;
@@ -243,6 +243,26 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       },
       onError: (message) => {
         if (playMode.current !== 'youtube') return;
+        const track = queueRef.current.current;
+        if (track) {
+          void (async () => {
+            try {
+              setIsLoading(true);
+              setError(null);
+              MusicService.invalidateStream(track);
+              const stream = await MusicService.resolveStream(track);
+              youtubeController.stop();
+              playMode.current = 'audio';
+              await playbackEngine.load(track, stream, { autoPlay: true });
+              setIsLoading(false);
+              autoSkips.current = 0;
+            } catch {
+              setIsLoading(false);
+              setError(message || 'Playback failed');
+            }
+          })();
+          return;
+        }
         setIsLoading(false);
         setError(message);
       },
