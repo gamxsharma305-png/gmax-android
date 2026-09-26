@@ -4,23 +4,20 @@ const {
 } = require('expo/config-plugins');
 
 /**
- * JitPack maven block restricted so Gradle NEVER queries jitpack.io for
- * Expo / Google / Maven Central artifacts (that caused 401 Unauthorized).
- *
- * Only com.github.TeamNewPipe* resolves from JitPack.
+ * JitPack restricted to NewPipe only — never query jitpack for expo.modules.*.
+ * Use includeGroup (double-quoted) — includeGroupByRegex + \\ breaks Groovy parser.
  */
 const JITPACK_BLOCK = `
         // GMAX: NewPipeExtractor ONLY — do not resolve expo.modules.* from JitPack
         maven {
-            url 'https://jitpack.io'
+            url "https://jitpack.io"
             content {
-                includeGroupByRegex 'com\\.github\\.TeamNewPipe.*'
+                includeGroup "com.github.TeamNewPipe"
             }
         }
 `;
 
 function stripExistingJitpack(contents) {
-  // Remove any prior plain or content-filtered jitpack maven blocks we may have injected
   return contents
     .replace(
       /\n?\s*\/\/\s*GMAX:[^\n]*NewPipe[^\n]*\n\s*maven\s*\{[\s\S]*?url\s+['"]https?:\/\/(?:www\.)?jitpack\.io['"][\s\S]*?\n\s*\}/g,
@@ -35,8 +32,6 @@ function stripExistingJitpack(contents) {
 function withJitpack(config) {
   return withSettingsGradle(config, (config) => {
     let contents = config.modResults.contents;
-
-    // Always re-apply a clean exclusiveContent-style block (upgrade old injections)
     contents = stripExistingJitpack(contents);
 
     const drmRepos =
@@ -51,7 +46,6 @@ function withJitpack(config) {
       return config;
     }
 
-    // Fallback if Expo layout is unexpected
     contents +=
       '\n\n// GMAX: JitPack for NewPipeExtractor only\n' +
       'dependencyResolutionManagement {\n' +
@@ -67,4 +61,4 @@ function withJitpack(config) {
   });
 }
 
-module.exports = createRunOncePlugin(withJitpack, 'withJitpack', '3.0.0');
+module.exports = createRunOncePlugin(withJitpack, 'withJitpack', '3.1.0');
