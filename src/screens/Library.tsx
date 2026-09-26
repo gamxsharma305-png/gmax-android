@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import {
   StyleSheet,
   Text,
@@ -7,25 +7,29 @@ import {
   TouchableOpacity,
   TextInput,
   Image,
+  ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Plus, Heart, ListMusic } from 'lucide-react-native';
+import { Plus, Heart, ListMusic, Radio } from 'lucide-react-native';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { MiniPlayer } from '../components/player/MiniPlayer';
 import { StatusBarScrim } from '../components/common/StatusBarScrim';
-import { GlassCard } from '../components/common/GlassCard';
 import { useLibrary } from '../hooks/useLibrary';
 import { usePlayer } from '../hooks/usePlayer';
 import { useNavigation } from '@react-navigation/native';
+import { AUTO_GENRE_PLAYLISTS } from '../data/catalog';
+import { MusicService } from '../services/MusicService';
 
 export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { playlists, likedPlaylist, createPlaylist } = useLibrary();
-  const { currentTrack, isPlaying, isLoading, togglePlayPause } = usePlayer();
+  const { currentTrack, isPlaying, isLoading, togglePlayPause, playTracks } = usePlayer();
 
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
+  const [loadingGenre, setLoadingGenre] = useState<string | null>(null);
 
   const ordered = useMemo(
     () => [...playlists].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0)),
@@ -44,6 +48,29 @@ export default function LibraryScreen() {
     setCreating(false);
     openPlaylist(p.id);
   };
+
+  const playAutoGenre = useCallback(
+    async (genre: (typeof AUTO_GENRE_PLAYLISTS)[0]) => {
+      if (loadingGenre) return;
+      setLoadingGenre(genre.id);
+      try {
+        const results = await MusicService.search(genre.query, { limit: 30 });
+        const tracks = results.tracks ?? [];
+        if (tracks.length && playTracks) {
+          await playTracks(tracks, 0);
+        } else if (tracks.length) {
+          // Fallback: create playlist and open
+          const p = createPlaylist(genre.name, { tracks, description: 'Auto playlist' });
+          openPlaylist(p.id);
+        }
+      } catch {
+        // ignore — user can retry
+      } finally {
+        setLoadingGenre(null);
+      }
+    },
+    [loadingGenre, playTracks, createPlaylist]
+  );
 
   const data = [
     { id: 'liked', name: 'Liked Songs', count: likedPlaylist.tracks.length, cover: null },
@@ -81,48 +108,75 @@ export default function LibraryScreen() {
         </View>
       )}
 
+      <Text style={styles.sectionLabel}>AUTO PLAYLISTS</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.genreRow}
+      >
+        {AUTO_GENRE_PLAYLISTS.map((g) => (
+          <TouchableOpacity
+            key={g.id}
+            style={[styles.genreChip, { borderColor: g.color + '66', backgroundColor: g.color + '22' }]}
+            onPress={() => void playAutoGenre(g)}
+            activeOpacity={0.8}
+          >
+            {loadingGenre === g.id ? (
+              <ActivityIndicator size="small" color={g.color} />
+            ) : (
+              <Radio size={14} color={g.color} />
+            )}
+            <Text style={[styles.genreText, { color: g.color }]}>{g.name}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      <Text style={styles.sectionLabel}>YOUR PLAYLISTS</Text>
       <FlatList
         data={data}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={{ paddingBottom: SIZES.bottomInset, paddingHorizontal: SIZES.md }}
+        contentContainerStyle={{
+          paddingHorizontal: SIZES.md,
+          paddingBottom: currentTrack ? 100 : insets.bottom + 24,
+        }}
+        ListEmptyComponent={
+          <Text style={styles.empty}>No playlists yet. Create one above.</Text>
+        }
         renderItem={({ item }) => (
-          <TouchableOpacity style={styles.row} onPress={() => openPlaylist(item.id)}>
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => openPlaylist(item.id)}
+            activeOpacity={0.7}
+          >
             <View style={styles.cover}>
               {item.cover ? (
                 <Image source={{ uri: item.cover }} style={styles.coverImg} />
               ) : item.id === 'liked' ? (
-                <Heart color={COLORS.accent?.red ?? '#ff6b6b'} size={22} />
+                <Heart size={22} color={COLORS.accent} fill={COLORS.accent} />
               ) : (
-                <ListMusic color={COLORS.text.secondary} size={22} />
+                <ListMusic size={22} color={COLORS.text.secondary} />
               )}
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.rowTitle} numberOfLines={1}>{item.name}</Text>
-              <Text style={styles.rowMeta}>{item.count} tracks</Text>
+              <Text style={styles.rowTitle} numberOfLines={1}>
+                {item.name}
+              </Text>
+              <Text style={styles.rowMeta}>{item.count} songs</Text>
             </View>
           </TouchableOpacity>
         )}
-        ListEmptyComponent={
-          <GlassCard intensity={20} style={{ padding: SIZES.lg }}>
-            <Text style={{ color: COLORS.text.secondary, fontFamily: FONTS.regular }}>
-              No playlists yet. Create one above.
-            </Text>
-          </GlassCard>
-        }
-        showsVerticalScrollIndicator={false}
       />
 
-      <StatusBarScrim />
-
-      {currentTrack && (
+      {currentTrack ? (
         <MiniPlayer
           track={currentTrack}
           isPlaying={isPlaying}
           isLoading={isLoading}
-          onPlayPause={togglePlayPause}
-          onPress={() => navigation.navigate('NowPlaying' as never)}
+          onToggle={togglePlayPause}
+          onOpen={() => navigation.navigate('NowPlaying' as never)}
         />
-      )}
+      ) : null}
+      <StatusBarScrim />
     </View>
   );
 }
@@ -131,29 +185,52 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: SIZES.md,
     paddingBottom: SIZES.md,
   },
-  title: { fontFamily: FONTS.bold, fontSize: 32, color: COLORS.text.primary },
+  title: { fontFamily: FONTS.bold, fontSize: 28, color: COLORS.text.primary },
+  sectionLabel: {
+    fontFamily: FONTS.medium,
+    fontSize: 10,
+    letterSpacing: 2,
+    color: COLORS.text.muted,
+    marginHorizontal: SIZES.md,
+    marginTop: SIZES.sm,
+    marginBottom: SIZES.sm,
+  },
+  genreRow: {
+    paddingHorizontal: SIZES.md,
+    gap: 8,
+    paddingBottom: SIZES.sm,
+  },
+  genreChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  genreText: { fontFamily: FONTS.medium, fontSize: 13 },
   createRow: {
     flexDirection: 'row',
-    gap: SIZES.sm,
     paddingHorizontal: SIZES.md,
+    gap: SIZES.sm,
     marginBottom: SIZES.md,
   },
   input: {
     flex: 1,
-    fontFamily: FONTS.medium,
-    fontSize: 15,
-    color: COLORS.text.primary,
     backgroundColor: COLORS.surfaceRaised,
     borderRadius: SIZES.radius.sm,
+    paddingHorizontal: SIZES.md,
+    paddingVertical: 10,
+    color: COLORS.text.primary,
+    fontFamily: FONTS.regular,
     borderWidth: 1,
     borderColor: COLORS.glassBorder,
-    paddingHorizontal: SIZES.md,
-    paddingVertical: SIZES.sm,
   },
   createBtn: {
     backgroundColor: COLORS.text.primary,
@@ -180,4 +257,11 @@ const styles = StyleSheet.create({
   coverImg: { width: '100%', height: '100%' },
   rowTitle: { fontFamily: FONTS.medium, fontSize: 16, color: COLORS.text.primary },
   rowMeta: { fontFamily: FONTS.regular, fontSize: 12, color: COLORS.text.secondary, marginTop: 2 },
+  empty: {
+    fontFamily: FONTS.regular,
+    fontSize: 14,
+    color: COLORS.text.muted,
+    textAlign: 'center',
+    marginTop: 40,
+  },
 });

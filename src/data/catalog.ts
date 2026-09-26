@@ -11,6 +11,20 @@ export const BROWSE_CATEGORIES: Category[] = [
   { id: 'c8', name: 'Rock', color: '#B22222', query: 'rock classics' },
 ];
 
+/** Auto genre playlists shown in Library — tap to search & play. */
+export const AUTO_GENRE_PLAYLISTS: { id: string; name: string; query: string; color: string }[] = [
+  { id: 'ag1', name: 'Punjabi', query: 'punjabi hits songs', color: '#E63946' },
+  { id: 'ag2', name: 'Hindi', query: 'bollywood hindi hits', color: '#F4A261' },
+  { id: 'ag3', name: 'Love', query: 'romantic love songs', color: '#E76F51' },
+  { id: 'ag4', name: 'Lofi', query: 'lofi hip hop beats', color: '#7B68EE' },
+  { id: 'ag5', name: 'Funk', query: 'funk disco groove', color: '#2A9D8F' },
+  { id: 'ag6', name: 'English', query: 'english pop hits', color: '#457B9D' },
+  { id: 'ag7', name: 'Sad', query: 'sad emotional songs', color: '#6D6875' },
+  { id: 'ag8', name: 'Party', query: 'party dance mix', color: '#FF006E' },
+  { id: 'ag9', name: 'Devotional', query: 'devotional bhajan', color: '#FFB703' },
+  { id: 'ag10', name: 'Rap', query: 'desi hip hop rap', color: '#8338EC' },
+];
+
 export const ACTION_QUERIES: Record<string, string[]> = {
   discover: [
     'trending songs this week',

@@ -20,17 +20,32 @@ export const DEFAULT_PROFILE: UserProfile = {
   completed: false,
 };
 
+export type ResolverEndpoint = {
+  url: string;
+  kind: 'invidious' | 'piped' | 'custom';
+};
+
 export type AppSettings = {
   profile: UserProfile;
-  resolverEndpoints: { url: string; kind: 'invidious' | 'piped' | 'custom' }[];
+  resolverEndpoints: ResolverEndpoint[];
   volume: number;
   preferAudioOnly: boolean;
   autoplayRelated: boolean;
 };
 
+/** Public mirrors used when user has not added any. Required for YouTube audio. */
+export const DEFAULT_RESOLVER_ENDPOINTS: ResolverEndpoint[] = [
+  { url: 'https://invidious.fdn.fr', kind: 'invidious' },
+  { url: 'https://inv.nadeko.net', kind: 'invidious' },
+  { url: 'https://invidious.privacyredirect.com', kind: 'invidious' },
+  { url: 'https://pipedapi.kavin.rocks', kind: 'piped' },
+  { url: 'https://pipedapi.adminforge.de', kind: 'piped' },
+  { url: 'https://pipedapi.me', kind: 'piped' },
+];
+
 export const DEFAULT_SETTINGS: AppSettings = {
   profile: DEFAULT_PROFILE,
-  resolverEndpoints: [],
+  resolverEndpoints: DEFAULT_RESOLVER_ENDPOINTS,
   volume: 1,
   preferAudioOnly: true,
   autoplayRelated: true,
@@ -81,11 +96,25 @@ class LibraryServiceImpl {
     this.playlists = Array.isArray(playlists) ? playlists : [];
     this.recents = Array.isArray(recents) ? recents : [];
     const stored = settings ?? {};
+
+    // Merge stored settings; if endpoints missing/empty, seed working defaults
+    const storedEndpoints = Array.isArray(stored.resolverEndpoints)
+      ? stored.resolverEndpoints.filter((e) => e && typeof e.url === 'string' && e.url.startsWith('http'))
+      : [];
+
     this.settings = {
       ...DEFAULT_SETTINGS,
       ...stored,
       profile: { ...DEFAULT_PROFILE, ...(stored.profile ?? {}) },
+      resolverEndpoints:
+        storedEndpoints.length > 0 ? storedEndpoints : DEFAULT_RESOLVER_ENDPOINTS,
     };
+
+    // Persist seeded endpoints so next launch and settings UI stay in sync
+    if (storedEndpoints.length === 0) {
+      void writeJson(STORAGE_KEYS.settings, this.settings);
+    }
+
     this.searchHistory = Array.isArray(history) ? history : [];
     this.history = Array.isArray(listenHistory) ? listenHistory : [];
   }
@@ -220,6 +249,25 @@ class LibraryServiceImpl {
     });
   }
 
+  /** Reorder tracks in a playlist (drag up/down). */
+  reorderPlaylistTracks(playlistId: string, fromIndex: number, toIndex: number): void {
+    const playlist = this.getPlaylist(playlistId);
+    if (!playlist) return;
+    const tracks = [...playlist.tracks];
+    if (
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= tracks.length ||
+      toIndex >= tracks.length ||
+      fromIndex === toIndex
+    ) {
+      return;
+    }
+    const [item] = tracks.splice(fromIndex, 1);
+    tracks.splice(toIndex, 0, item);
+    this.updatePlaylist(playlistId, { tracks });
+  }
+
   private persistPlaylists(): void {
     writeJsonDebounced(STORAGE_KEYS.playlists, this.playlists, 400);
   }
@@ -319,6 +367,16 @@ class LibraryServiceImpl {
   }
 
   updateSettings(patch: Partial<AppSettings>): AppSettings {
+    // Never allow clearing all endpoints — fall back to defaults
+    if (patch.resolverEndpoints !== undefined) {
+      const next = patch.resolverEndpoints.filter(
+        (e) => e && typeof e.url === 'string' && e.url.startsWith('http')
+      );
+      patch = {
+        ...patch,
+        resolverEndpoints: next.length > 0 ? next : DEFAULT_RESOLVER_ENDPOINTS,
+      };
+    }
     this.settings = { ...this.settings, ...patch };
     void writeJson(STORAGE_KEYS.settings, this.settings);
     return this.getSettings();
