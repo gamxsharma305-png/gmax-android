@@ -107,6 +107,19 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        <Text style={styles.sectionLabel}>FEATURES</Text>
+        <View style={styles.card}>
+          <Row label="Background audio" value="On" />
+          <Divider />
+          <Row label="YouTube + Saavn + Audius" value="On" />
+          <Divider />
+          <Row label="Auto playlists" value="On" />
+          <Divider />
+          <Row label="Offline queue" value="On" />
+          <Divider />
+          <Row label="Lock screen controls" value="On" />
+        </View>
+
         <Text style={styles.sectionLabel}>ABOUT</Text>
         <View style={styles.card}>
           <Row label="App" value="Gmax" />
