@@ -1,6 +1,6 @@
 /**
- * EAS / local: ensure assets/icon.png is the GMAX app icon.
- * Prefers embedded user icon; falls back to download URL then solid color.
+ * EAS / local: write assets/icon.png from the GMAX user icon URL.
+ * Falls back to a solid dark square only if download fails.
  */
 const fs = require("fs");
 const path = require("path");
@@ -9,9 +9,6 @@ const http = require("http");
 const zlib = require("zlib");
 
 const ICON_URL = "https://i.postimg.cc/prCsgYtQ/me-(1).png";
-
-// Base64 of 1024x1024 GMAX icon (user-provided image, scaled)
-const EMBEDDED_ICON_B64 = require("./icon-data.json").b64;
 
 function crc32(buf) {
   let c = 0xffffffff;
@@ -57,24 +54,37 @@ function makeFallbackPng(size) {
   ]);
 }
 
-function download(url) {
+function download(url, redirects = 0) {
   return new Promise((resolve, reject) => {
+    if (redirects > 5) return reject(new Error("too many redirects"));
     const mod = url.startsWith("https") ? https : http;
-    const req = mod.get(url, { headers: { "User-Agent": "GMAX-EAS/1.0" } }, (res) => {
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        download(res.headers.location).then(resolve, reject);
-        return;
+    const req = mod.get(
+      url,
+      {
+        headers: {
+          "User-Agent": "Mozilla/5.0 GMAX-EAS/1.0",
+          Accept: "image/png,image/*;q=0.8,*/*;q=0.5",
+        },
+      },
+      (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          const next = res.headers.location.startsWith("http")
+            ? res.headers.location
+            : new URL(res.headers.location, url).href;
+          download(next, redirects + 1).then(resolve, reject);
+          return;
+        }
+        if (res.statusCode !== 200) {
+          reject(new Error("HTTP " + res.statusCode));
+          return;
+        }
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => resolve(Buffer.concat(chunks)));
       }
-      if (res.statusCode !== 200) {
-        reject(new Error("HTTP " + res.statusCode));
-        return;
-      }
-      const chunks = [];
-      res.on("data", (c) => chunks.push(c));
-      res.on("end", () => resolve(Buffer.concat(chunks)));
-    });
+    );
     req.on("error", reject);
-    req.setTimeout(15000, () => {
+    req.setTimeout(20000, () => {
       req.destroy();
       reject(new Error("timeout"));
     });
@@ -86,45 +96,24 @@ async function main() {
   fs.mkdirSync(dir, { recursive: true });
   const out = path.join(dir, "icon.png");
 
-  // Skip if a real icon already exists (>5KB)
-  try {
-    if (fs.existsSync(out) && fs.statSync(out).size > 5000) {
-      console.log("[ensure-icon] keeping existing", out, fs.statSync(out).size);
-      return;
-    }
-  } catch (_) {}
-
-  // 1) Embedded user icon
-  try {
-    const buf = Buffer.from(EMBEDDED_ICON_B64, "base64");
-    if (buf.length > 1000 && buf[0] === 0x89 && buf[1] === 0x50) {
-      fs.writeFileSync(out, buf);
-      console.log("[ensure-icon] wrote embedded icon", out, buf.length, "bytes");
-      return;
-    }
-  } catch (e) {
-    console.warn("[ensure-icon] embedded failed", e.message);
-  }
-
-  // 2) Download
   try {
     const buf = await download(ICON_URL);
-    if (buf.length > 500 && buf[0] === 0x89) {
+    if (buf.length > 500 && buf[0] === 0x89 && buf[1] === 0x50) {
       fs.writeFileSync(out, buf);
-      console.log("[ensure-icon] wrote downloaded icon", out, buf.length, "bytes");
+      console.log("[ensure-icon] wrote user icon", out, buf.length, "bytes");
       return;
     }
+    console.warn("[ensure-icon] download not a valid PNG, length=", buf.length);
   } catch (e) {
-    console.warn("[ensure-icon] download failed", e.message);
+    console.warn("[ensure-icon] download failed:", e.message);
   }
 
-  // 3) Fallback
   const png = makeFallbackPng(1024);
   fs.writeFileSync(out, png);
   console.log("[ensure-icon] wrote fallback", out, png.length, "bytes");
 }
 
 main().catch((e) => {
-  console.error(e);
+  console.error("[ensure-icon]", e);
   process.exit(0);
 });
