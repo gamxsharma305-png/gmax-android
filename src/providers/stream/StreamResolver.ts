@@ -2,6 +2,7 @@ import { fetchJson } from '../../core/http';
 import { appError, appErrorWithMessage, AppError, toAppError } from '../../core/errors';
 import { ResolvedStream, Track } from '../../core/types';
 import { NativeStreamSource } from './NativeStreamSource';
+import { TitleMatchStreamSource } from './TitleMatchStreamSource';
 
 export interface StreamSource {
   readonly id: string;
@@ -114,7 +115,7 @@ export class EndpointStreamSource implements StreamSource {
   }
 
   canHandle(track: Track): boolean {
-    return track.provider === 'youtube' && this.endpoints.length > 0;
+    return track.provider === 'youtube' && !!track.sourceId && this.endpoints.length > 0;
   }
 
   async resolve(track: Track, signal?: AbortSignal): Promise<ResolvedStream> {
@@ -215,7 +216,7 @@ export class StreamResolverChain {
     if (!usable.length) {
       throw appErrorWithMessage(
         'source_unavailable',
-        'No playback source yet. Tap the speaker icon to add one.',
+        'No playback source yet. Tap to retry.',
         'no StreamSource can handle this track'
       );
     }
@@ -240,7 +241,9 @@ export class StreamResolverChain {
 
 export const endpointSource = new EndpointStreamSource();
 
+/** Order: direct URL → Saavn/Audius title match → native stub → optional Invidious/Piped */
 export const streamResolver = new StreamResolverChain()
   .use(new DirectStreamSource())
+  .use(new TitleMatchStreamSource())
   .use(new NativeStreamSource())
   .use(endpointSource);

@@ -1,29 +1,45 @@
 import { Category } from '../core/types';
 
 export const BROWSE_CATEGORIES: Category[] = [
-  { id: 'c1', name: 'Charts', color: '#1DB954', query: 'top hits this week' },
-  { id: 'c2', name: 'New Releases', color: '#8A2BE2', query: 'new music releases' },
-  { id: 'c3', name: 'Moods', color: '#FF7F50', query: 'chill mood playlist' },
-  { id: 'c4', name: 'Indian', color: '#DAA520', query: 'bollywood hits' },
-  { id: 'c5', name: 'Hip-Hop', color: '#4682B4', query: 'hip hop essentials' },
-  { id: 'c6', name: 'Pop', color: '#FF69B4', query: 'pop hits' },
-  { id: 'c7', name: 'EDM', color: '#00CED1', query: 'edm dance mix' },
-  { id: 'c8', name: 'Rock', color: '#B22222', query: 'rock classics' },
+  { id: 'c1', name: 'Charts', color: '#3d9a68', query: 'top hits this week' },
+  { id: 'c2', name: 'New Releases', color: '#6b7c93', query: 'new music releases' },
+  { id: 'c3', name: 'Moods', color: '#c4785a', query: 'chill mood playlist' },
+  { id: 'c4', name: 'Indian', color: '#b08a3a', query: 'bollywood hits' },
+  { id: 'c5', name: 'Hip-Hop', color: '#4a7aa3', query: 'hip hop essentials' },
+  { id: 'c6', name: 'Pop', color: '#c46b8a', query: 'pop hits' },
+  { id: 'c7', name: 'EDM', color: '#3aa8ad', query: 'edm dance mix' },
+  { id: 'c8', name: 'Rock', color: '#a34545', query: 'rock classics' },
 ];
 
-/** Auto genre playlists shown in Library — tap to search & play. */
-export const AUTO_GENRE_PLAYLISTS: { id: string; name: string; query: string; color: string }[] = [
-  { id: 'ag1', name: 'Punjabi', query: 'punjabi hits songs', color: '#E63946' },
-  { id: 'ag2', name: 'Hindi', query: 'bollywood hindi hits', color: '#F4A261' },
-  { id: 'ag3', name: 'Love', query: 'romantic love songs', color: '#E76F51' },
-  { id: 'ag4', name: 'Lofi', query: 'lofi hip hop beats', color: '#7B68EE' },
-  { id: 'ag5', name: 'Funk', query: 'funk disco groove', color: '#2A9D8F' },
-  { id: 'ag6', name: 'English', query: 'english pop hits', color: '#457B9D' },
-  { id: 'ag7', name: 'Sad', query: 'sad emotional songs', color: '#6D6875' },
-  { id: 'ag8', name: 'Party', query: 'party dance mix', color: '#FF006E' },
-  { id: 'ag9', name: 'Devotional', query: 'devotional bhajan', color: '#FFB703' },
-  { id: 'ag10', name: 'Rap', query: 'desi hip hop rap', color: '#8338EC' },
+/** Same AUTO MIXES as GMAX website Library. */
+export const AUTO_PLAYLISTS: {
+  id: string;
+  name: string;
+  color: string;
+  query: string;
+  description: string;
+}[] = [
+  { id: 'auto-punjabi', name: 'Punjabi Hits', color: '#e8b923', query: 'punjabi hits songs', description: 'Top Punjabi' },
+  { id: 'auto-hindi', name: 'Hindi Hits', color: '#e07a5f', query: 'bollywood hindi hits', description: 'Bollywood' },
+  { id: 'auto-love', name: 'Love Songs', color: '#e056a0', query: 'romantic love songs hindi', description: 'Romantic' },
+  { id: 'auto-lofi', name: 'Lo-fi Chill', color: '#7c9cbf', query: 'lofi chill beats', description: 'Study & chill' },
+  { id: 'auto-funk', name: 'Funk & Groove', color: '#c45c26', query: 'funk groove songs', description: 'Funk' },
+  { id: 'auto-phonk', name: 'Phonk', color: '#6b4ce6', query: 'phonk drift music', description: 'Drift phonk' },
+  { id: 'auto-hiphop', name: 'Hip-Hop', color: '#4a7aa3', query: 'hip hop rap hits', description: 'Rap & hip-hop' },
+  { id: 'auto-edm', name: 'EDM Party', color: '#3aa8ad', query: 'edm dance party mix', description: 'Dance' },
+  { id: 'auto-sad', name: 'Sad Songs', color: '#6b7c93', query: 'sad emotional songs hindi', description: 'Heartbreak' },
+  { id: 'auto-party', name: 'Party Mix', color: '#d4a017', query: 'party dance bollywood', description: 'Party' },
+  { id: 'auto-english', name: 'English Pop', color: '#c46b8a', query: 'english pop hits 2024', description: 'Pop' },
+  { id: 'auto-ghazal', name: 'Ghazal / Soft', color: '#8b7355', query: 'ghazal soft hindi songs', description: 'Soft' },
 ];
+
+/** @deprecated use AUTO_PLAYLISTS */
+export const AUTO_GENRE_PLAYLISTS = AUTO_PLAYLISTS.map((p) => ({
+  id: p.id,
+  name: p.name,
+  query: p.query,
+  color: p.color,
+}));
 
 export const ACTION_QUERIES: Record<string, string[]> = {
   discover: [
@@ -31,31 +47,26 @@ export const ACTION_QUERIES: Record<string, string[]> = {
     'viral hits right now',
     'top global chart songs',
     'new music this month',
-    'breakout artists 2026',
     'most played songs today',
   ],
   chill: [
-    'chill relaxing songs',
-    'lofi chill beats',
-    'acoustic chill playlist',
-    'calm indie chill',
-    'soft rnb chill',
-    'sunset chill mix',
+    'Dean Luffy hindi songs',
+    'indian lofi chill',
+    'hindi chill soft songs',
+    'soft indian songs',
   ],
   focus: [
-    'focus instrumental concentration',
-    'deep focus study music',
-    'ambient focus no lyrics',
-    'piano focus instrumental',
-    'minimal techno focus',
-    'nature focus soundscape',
+    'Sidhu Moose Wala hits',
+    'Shubh punjabi songs',
+    'punjabi hits Sidhu',
+    'top punjabi songs',
   ],
 };
 
 export function randomQueryFor(actionId: string): string | null {
   const pool = ACTION_QUERIES[actionId];
-  if (!pool || pool.length === 0) return null;
-  return pool[Math.floor(Math.random() * pool.length)];
+  if (!pool?.length) return null;
+  return pool[Math.floor(Math.random() * pool.length)] ?? null;
 }
 
 export const QUICK_ACTIONS = [
