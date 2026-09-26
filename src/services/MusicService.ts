@@ -9,6 +9,7 @@ import {
 import { PlaylistPage, providers } from '../providers/TrackResolver';
 import { youtubeResolver } from '../providers/youtube/YouTubeResolver';
 import { streamResolver } from '../providers/stream/StreamResolver';
+import { multiSourceSearch } from '../providers/MultiSourceSearch';
 
 providers.register(youtubeResolver, true);
 
@@ -24,9 +25,34 @@ class MusicServiceImpl {
     const q = query.trim();
     if (!q) return emptySearchResults();
 
+    const limit = options.limit ?? 24;
+
+    // YouTube Music results (may lack audioUrl)
+    let youtubeTracks: Track[] = [];
     try {
-      return await providers.default.search(q, options);
+      const yt = await providers.default.search(q, { ...options, limit: Math.ceil(limit / 2) });
+      youtubeTracks = yt.tracks || [];
+    } catch {
+      youtubeTracks = [];
+    }
+
+    // Saavn + Audius + iTunes (with audioUrl → background OK)
+    try {
+      return await multiSourceSearch(q, {
+        limit,
+        signal: options.signal,
+        youtubeTracks,
+      });
     } catch (e) {
+      if (youtubeTracks.length) {
+        return {
+          query: q,
+          tracks: youtubeTracks.slice(0, limit),
+          artists: [],
+          albums: [],
+          playlists: [],
+        };
+      }
       throw toAppError(e, 'search_failed');
     }
   }
@@ -38,6 +64,7 @@ class MusicServiceImpl {
   }
 
   async getMetadata(track: Track, signal?: AbortSignal): Promise<Track> {
+    if (track.provider !== 'youtube') return track;
     return providers.forTrack(track).getMetadata(track.sourceId, signal);
   }
 
@@ -85,6 +112,7 @@ class MusicServiceImpl {
   }
 
   async getRelated(track: Track, signal?: AbortSignal): Promise<Track[]> {
+    if (track.provider !== 'youtube') return [];
     const provider = providers.forTrack(track);
     if (!provider.getRelated) return [];
     return provider.getRelated(track, signal);
@@ -108,22 +136,22 @@ class MusicServiceImpl {
     return { track: await provider.getMetadata(parsed.id, signal) };
   }
 
+  /** All providers go through streamResolver (direct URL / Saavn match / YT endpoints). */
   async resolveStream(track: Track, signal?: AbortSignal) {
-    return providers.forTrack(track).resolve(track, signal);
+    return streamResolver.resolve(track, signal);
   }
 
   canPlay(track: Track): boolean {
-    if (track.provider === 'youtube' && track.sourceId) return true;
     if (track.audioUrl) return true;
+    if (track.provider === 'youtube' && track.sourceId) return true;
     return streamResolver.canResolve(track);
   }
 
   prefetchStream(track: Track | null): void {
     if (!track) return;
-    if (track.provider === 'youtube' && track.sourceId) return;
+    if (track.audioUrl) return;
     if (!streamResolver.canResolve(track)) return;
     if (streamResolver.peek(track)) return;
-
     void streamResolver.resolve(track).catch(() => undefined);
   }
 
