@@ -9,13 +9,14 @@ import React, {
   ReactNode,
 } from 'react';
 import { AppState, Platform } from 'react-native';
-import { AppError, messageFor, toAppError } from '../core/errors';
+import { AppError, appErrorWithMessage, messageFor, toAppError } from '../core/errors';
 import { RepeatMode, Track } from '../core/types';
 import { flushWrites, readJson, writeJsonDebounced, STORAGE_KEYS } from '../core/storage';
 import { playbackEngine, IDLE_STATUS, PlaybackStatus } from '../playback/PlaybackEngine';
 import { Queue, QueueSnapshot, EMPTY_QUEUE } from '../playback/queue';
 import { preloader } from '../playback/preload';
 import { endpointSource } from '../providers/stream/StreamResolver';
+import { youtubeController } from '../player/youtubeController';
 import { LibraryService } from '../services/LibraryService';
 import { MusicService } from '../services/MusicService';
 
@@ -80,6 +81,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   const loadAbort = useRef<AbortController | null>(null);
   const loadId = useRef(0);
+  const playMode = useRef<'audio' | 'youtube'>('audio');
   const lastAttempt = useRef<{ track: Track; position: number } | null>(null);
   const loadingTrackId = useRef<string | null>(null);
   const autoSkips = useRef(0);
@@ -98,6 +100,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         setCurrentTrack(null);
         setIsLoading(false);
         playbackEngine.stop();
+        youtubeController.stop();
         return;
       }
 
@@ -119,12 +122,23 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       lastAttempt.current = { track, position: options.startPosition ?? 0 };
 
       try {
-        const stream = await MusicService.resolveStream(track, controller.signal);
-        if (id !== loadId.current) return;
+        if (track.provider === 'youtube' && track.sourceId) {
+          playbackEngine.stop();
+          playMode.current = 'youtube';
+          youtubeController.load(track.sourceId, {
+            autoPlay: options.autoPlay !== false,
+            startAt: options.startPosition ?? 0,
+          });
+        } else {
+          const stream = await MusicService.resolveStream(track, controller.signal);
+          if (id !== loadId.current) return;
+          youtubeController.stop();
+          playMode.current = 'audio';
+          await playbackEngine.load(track, stream, options);
+          if (id !== loadId.current) return;
+        }
 
-        await playbackEngine.load(track, stream, options);
         if (id !== loadId.current) return;
-
         setIsLoading(false);
         autoSkips.current = 0;
         loadingTrackId.current = null;
@@ -132,6 +146,24 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         preloader.schedule(queueRef.current.peekNext());
       } catch (e) {
         if (id !== loadId.current) return;
+
+        if (track.provider === 'youtube' && track.sourceId) {
+          try {
+            playbackEngine.stop();
+            playMode.current = 'youtube';
+            youtubeController.load(track.sourceId, {
+              autoPlay: options.autoPlay !== false,
+              startAt: options.startPosition ?? 0,
+            });
+            setIsLoading(false);
+            loadingTrackId.current = null;
+            autoSkips.current = 0;
+            LibraryService.recordPlay(track);
+            return;
+          } catch {
+            /* fall through */
+          }
+        }
 
         setIsLoading(false);
         loadingTrackId.current = null;
@@ -183,9 +215,41 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   }, [bumpQueue, loadCurrent, persistQueue]);
 
   useEffect(() => {
-    playbackEngine.on('onStatus', (s) => setStatus(s));
+    playbackEngine.on('onStatus', (s) => {
+      if (playMode.current === 'youtube') return;
+      setStatus(s);
+    });
+
+    youtubeController.on({
+      onStatus: (s) => {
+        if (playMode.current !== 'youtube') return;
+        setStatus({
+          isPlaying: s.isPlaying,
+          isBuffering: s.isBuffering,
+          isLoaded: s.isLoaded,
+          position: s.position,
+          duration: s.duration,
+          volume: 1,
+        });
+        if (s.isLoaded) setIsLoading(false);
+        if (s.error) setError(s.error);
+      },
+      onEnded: () => {
+        if (playMode.current !== 'youtube') return;
+        const nextTrack = queueRef.current.next(true);
+        bumpQueue();
+        persistQueue();
+        if (nextTrack) void loadCurrent({ autoPlay: true });
+      },
+      onError: (message) => {
+        if (playMode.current !== 'youtube') return;
+        setIsLoading(false);
+        setError(message);
+      },
+    });
 
     playbackEngine.on('onComplete', () => {
+      if (playMode.current === 'youtube') return;
       const nextTrack = queueRef.current.next(true);
       bumpQueue();
       persistQueue();
@@ -197,6 +261,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     });
 
     playbackEngine.on('onError', (e) => {
+      if (playMode.current === 'youtube') return;
       setIsLoading(false);
       setError(messageFor(e instanceof AppError ? e : toAppError(e, 'playback_failed')));
     });
@@ -204,6 +269,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     return () => {
       preloader.cancel();
       void playbackEngine.release();
+      youtubeController.stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -313,7 +379,13 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const track = queueRef.current.current ?? currentTrack;
     if (!track) return;
 
-    if (playbackEngine.trackId !== track.id) {
+    const isYtCurrent =
+      playMode.current === 'youtube' &&
+      track.provider === 'youtube' &&
+      youtubeController.getStatus().videoId === track.sourceId;
+    const isAudioCurrent = playMode.current === 'audio' && playbackEngine.trackId === track.id;
+
+    if (!isYtCurrent && !isAudioCurrent) {
       if (!queueRef.current.current) {
         queueRef.current.setTracks([track], 0, '');
         bumpQueue();
@@ -325,6 +397,11 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       return;
     }
 
+    if (playMode.current === 'youtube') {
+      if (status.isPlaying) youtubeController.pause();
+      else youtubeController.play();
+      return;
+    }
     if (status.isPlaying) playbackEngine.pause();
     else playbackEngine.play();
   }, [bumpQueue, currentTrack, loadCurrent, status.isPlaying]);
@@ -342,7 +419,8 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   const previous = useCallback(() => {
     if (statusRef.current.position > 3) {
-      void playbackEngine.seekTo(0);
+      if (playMode.current === 'youtube') youtubeController.seek(0);
+      else void playbackEngine.seekTo(0);
       return;
     }
     queueRef.current.previous();
@@ -352,6 +430,10 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   }, [bumpQueue, loadCurrent, persistQueue]);
 
   const seekTo = useCallback((seconds: number) => {
+    if (playMode.current === 'youtube') {
+      youtubeController.seek(seconds);
+      return;
+    }
     void playbackEngine.seekTo(seconds);
   }, []);
 
@@ -361,7 +443,8 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       const total = duration || currentTrack?.duration || 0;
       const target = position + deltaSeconds;
       const clamped = total > 0 ? Math.min(total, Math.max(0, target)) : Math.max(0, target);
-      void playbackEngine.seekTo(clamped);
+      if (playMode.current === 'youtube') youtubeController.seek(clamped);
+      else void playbackEngine.seekTo(clamped);
     },
     [currentTrack?.duration]
   );
@@ -415,6 +498,8 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         if (queueRef.current.current) void loadCurrent({ autoPlay: true });
         else {
           playbackEngine.stop();
+          youtubeController.stop();
+          playMode.current = 'audio';
           setCurrentTrack(null);
         }
       }
