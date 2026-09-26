@@ -1,8 +1,8 @@
 /**
- * Canonical domain model for NØTE.
+ * Canonical domain model for GMAX.
  */
 
-export type ProviderId = 'youtube';
+export type ProviderId = 'youtube' | 'saavn' | 'audius' | 'itunes';
 
 export type Artist = {
   id: string;
@@ -16,6 +16,7 @@ export type Track = {
   artist: Artist;
   albumImageUrl: string;
   duration: number;
+  /** Direct playable HTTPS audio — enables real background playback */
   audioUrl?: string;
   provider: ProviderId;
   sourceId: string;
@@ -98,8 +99,8 @@ export type ResolvedStream = {
   mimeType?: string;
   bitrate?: number;
   expiresAt: number;
-  resolvedBy: string;
   headers?: Record<string, string>;
+  resolvedBy?: string;
 };
 
 export type RepeatMode = 'off' | 'all' | 'one';
