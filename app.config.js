@@ -31,7 +31,7 @@ module.exports = {
   },
   android: {
     package: "com.gmax.player",
-    versionCode: 20,
+    versionCode: 21,
     adaptiveIcon: {
       foregroundImage: "./assets/icon.png",
       backgroundColor: "#050707",
@@ -42,9 +42,11 @@ module.exports = {
       "WAKE_LOCK",
       "FOREGROUND_SERVICE",
       "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+      "POST_NOTIFICATIONS",
       "android.permission.MODIFY_AUDIO_SETTINGS",
       "android.permission.FOREGROUND_SERVICE",
       "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+      "android.permission.POST_NOTIFICATIONS",
     ],
   },
   plugins: [
@@ -57,6 +59,7 @@ module.exports = {
       },
     ],
     "expo-asset",
+    "./plugins/withJitpack",
     "./plugins/withAndroidAbis",
     "./plugins/withReleaseSigning",
   ],
