@@ -24,14 +24,14 @@ android {
   }
 }
 
-repositories {
-  google()
-  mavenCentral()
-  maven { url 'https://jitpack.io' }
-}
+// Do NOT declare project-level repositories here.
+// Gradle 9 PREFER_SETTINGS ignores them and they conflict with settings.gradle.
+// JitPack is added ONLY in settings.gradle via plugins/withJitpack.js
+// with content filter for com.github.TeamNewPipe*.
 
 dependencies {
-  // Native YouTube stream extraction (no JS runtime)
+  // Native YouTube stream extraction (resolved via settings.gradle JitPack filter)
   implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.24.3")
+  // OkHttp from Maven Central (not JitPack)
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
