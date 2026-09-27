@@ -31,7 +31,7 @@ module.exports = {
   },
   android: {
     package: "com.gmax.player",
-    versionCode: 24,
+    versionCode: 25,
     adaptiveIcon: {
       foregroundImage: "./assets/icon.png",
       backgroundColor: "#050707",
@@ -59,6 +59,7 @@ module.exports = {
       },
     ],
     "expo-asset",
+    "./plugins/withCoreLibraryDesugaring",
     "./plugins/withJitpack",
     "./plugins/withAndroidAbis",
     "./plugins/withReleaseSigning",
