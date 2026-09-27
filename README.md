@@ -7,7 +7,7 @@ Source from your uploaded project zip (NOTE-based music player).
 Repo is being aligned to the zip contents. Core configs (`package.json`, `app.json`, `App.tsx`, `eas.json`, plugins) are in place.
 
 - **Expo project:** gmax519 / gmax  
-- **Project ID:** d0b9f8bc-3fe4-48a4-97b8-52a2476cd528  
+- **Project ID:** Id 
 - **Package:** com.gmax.player  
 
 ## Assets
