@@ -9,14 +9,13 @@ import React, {
   ReactNode,
 } from 'react';
 import { AppState, Platform } from 'react-native';
-import { AppError, appErrorWithMessage, messageFor, toAppError } from '../core/errors';
+import { AppError, messageFor, toAppError } from '../core/errors';
 import { RepeatMode, Track } from '../core/types';
 import { flushWrites, readJson, writeJsonDebounced, STORAGE_KEYS } from '../core/storage';
 import { playbackEngine, IDLE_STATUS, PlaybackStatus } from '../playback/PlaybackEngine';
 import { Queue, QueueSnapshot, EMPTY_QUEUE } from '../playback/queue';
 import { preloader } from '../playback/preload';
 import { endpointSource } from '../providers/stream/StreamResolver';
-import { youtubeController } from '../player/youtubeController';
 import { LibraryService } from '../services/LibraryService';
 import { MusicService } from '../services/MusicService';
 
@@ -61,6 +60,7 @@ const HISTORY_MIN_RATIO = 0.25;
 const MAX_AUTO_SKIPS = 3;
 
 const PlayerContext = createContext<PlayerContextType | undefined>(undefined);
+
 const ProgressContext = createContext<{ position: number; duration: number }>({
   position: 0,
   duration: 0,
@@ -81,7 +81,6 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   const loadAbort = useRef<AbortController | null>(null);
   const loadId = useRef(0);
-  const playMode = useRef<'audio' | 'youtube'>('audio');
   const lastAttempt = useRef<{ track: Track; position: number } | null>(null);
   const loadingTrackId = useRef<string | null>(null);
   const autoSkips = useRef(0);
@@ -100,7 +99,6 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         setCurrentTrack(null);
         setIsLoading(false);
         playbackEngine.stop();
-        youtubeController.stop();
         return;
       }
 
@@ -113,8 +111,14 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       const controller = new AbortController();
       loadAbort.current = controller;
       loadingTrackId.current = track.id;
+
+      const preloadedThis = preloader.pending === track.id;
       historyWrittenFor.current = null;
       preloader.adopt(track.id);
+
+      if (__DEV__) {
+        console.log('[playback] load', track.title, '| preloaded:', preloadedThis);
+      }
 
       setCurrentTrack(track);
       setError(null);
@@ -122,52 +126,26 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       lastAttempt.current = { track, position: options.startPosition ?? 0 };
 
       try {
-        // 1) Prefer real audio stream (Saavn / Audius / direct)
-        let stream: Awaited<ReturnType<typeof MusicService.resolveStream>> | null = null;
-        try {
-          stream = await MusicService.resolveStream(track, controller.signal);
-        } catch {
-          stream = null;
-        }
+        const stream = await MusicService.resolveStream(track, controller.signal);
         if (id !== loadId.current) return;
 
-        if (stream?.url) {
-          youtubeController.stop();
-          playMode.current = 'audio';
-          await playbackEngine.load(track, stream, options);
-          if (id !== loadId.current) return;
-          setIsLoading(false);
-          autoSkips.current = 0;
-          loadingTrackId.current = null;
-          LibraryService.recordPlay(track);
-          preloader.schedule(queueRef.current.peekNext());
-          return;
-        }
+        await playbackEngine.load(track, stream, options);
+        if (id !== loadId.current) return;
 
-        // 2) YouTube embed when stream not found
-        if (track.provider === 'youtube' && track.sourceId) {
-          playbackEngine.stop();
-          playMode.current = 'youtube';
-          youtubeController.load(track.sourceId, {
-            autoPlay: options.autoPlay !== false,
-            startAt: options.startPosition ?? 0,
-          });
-          LibraryService.recordPlay(track);
-          preloader.schedule(queueRef.current.peekNext());
-          return;
-        }
+        setIsLoading(false);
+        autoSkips.current = 0;
+        loadingTrackId.current = null;
+        if (__DEV__) console.log('[playback] started', track.title);
+        LibraryService.recordPlay(track);
 
-        throw appErrorWithMessage(
-          'source_unavailable',
-          'No playback source available for this track.',
-          'no stream and no youtube id'
-        );
+        preloader.schedule(queueRef.current.peekNext());
       } catch (e) {
         if (id !== loadId.current) return;
 
         setIsLoading(false);
         loadingTrackId.current = null;
         const err = toAppError(e, 'playback_failed');
+        if (__DEV__) console.log('[playback] FAILED', track.title, '|', err.kind, '|', err.detail ?? '');
 
         if (err.kind !== 'network' && err.kind !== 'timeout') {
           MusicService.invalidateStream(track);
@@ -180,6 +158,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
         if (skippable && autoSkips.current < MAX_AUTO_SKIPS && queueRef.current.hasNext) {
           autoSkips.current += 1;
+          if (__DEV__) console.log('[playback] auto-skip', autoSkips.current, 'past', track.title);
           queueRef.current.next(false);
           bumpQueue();
           persistQueue();
@@ -197,17 +176,21 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const extendWithRelated = useCallback(async () => {
     const settings = LibraryService.getSettings();
     const last = queueRef.current.current;
+
     if (!settings.autoplayRelated || !last) return;
 
     try {
       const related = await MusicService.getRelated(last);
-      const fresh = related.filter((t) => !queueRef.current.items.some((q) => q.id === t.id));
+      const fresh = related.filter(
+        (t) => !queueRef.current.items.some((q) => q.id === t.id)
+      );
       if (!fresh.length) return;
 
       queueRef.current.add(fresh.slice(0, 20));
       const nextTrack = queueRef.current.next(false);
       bumpQueue();
       persistQueue();
+
       if (nextTrack) void loadCurrent({ autoPlay: true });
     } catch {
       // silence
@@ -215,64 +198,13 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   }, [bumpQueue, loadCurrent, persistQueue]);
 
   useEffect(() => {
-    playbackEngine.on('onStatus', (s) => {
-      if (playMode.current === 'youtube') return;
-      setStatus(s);
-    });
-
-    youtubeController.on({
-      onStatus: (s) => {
-        if (playMode.current !== 'youtube') return;
-        setStatus({
-          isPlaying: s.isPlaying,
-          isBuffering: s.isBuffering,
-          isLoaded: s.isLoaded,
-          position: s.position,
-          duration: s.duration,
-          volume: 1,
-        });
-        if (s.isLoaded) setIsLoading(false);
-        if (s.error) setError(s.error);
-      },
-      onEnded: () => {
-        if (playMode.current !== 'youtube') return;
-        const nextTrack = queueRef.current.next(true);
-        bumpQueue();
-        persistQueue();
-        if (nextTrack) void loadCurrent({ autoPlay: true });
-      },
-      onError: (message) => {
-        if (playMode.current !== 'youtube') return;
-        const track = queueRef.current.current;
-        if (track) {
-          void (async () => {
-            try {
-              setIsLoading(true);
-              setError(null);
-              MusicService.invalidateStream(track);
-              const stream = await MusicService.resolveStream(track);
-              youtubeController.stop();
-              playMode.current = 'audio';
-              await playbackEngine.load(track, stream, { autoPlay: true });
-              setIsLoading(false);
-              autoSkips.current = 0;
-            } catch {
-              setIsLoading(false);
-              setError(message || 'Playback failed');
-            }
-          })();
-          return;
-        }
-        setIsLoading(false);
-        setError(message);
-      },
-    });
+    playbackEngine.on('onStatus', (s) => setStatus(s));
 
     playbackEngine.on('onComplete', () => {
-      if (playMode.current === 'youtube') return;
       const nextTrack = queueRef.current.next(true);
       bumpQueue();
       persistQueue();
+
       if (!nextTrack) {
         void extendWithRelated();
         return;
@@ -281,7 +213,6 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     });
 
     playbackEngine.on('onError', (e) => {
-      if (playMode.current === 'youtube') return;
       setIsLoading(false);
       setError(messageFor(e instanceof AppError ? e : toAppError(e, 'playback_failed')));
     });
@@ -289,7 +220,6 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     return () => {
       preloader.cancel();
       void playbackEngine.release();
-      youtubeController.stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -329,7 +259,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           }
         }
       } catch {
-        // ignore corrupt restore
+        // ignore
       } finally {
         if (!cancelled) setIsReady(true);
       }
@@ -350,6 +280,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     if (historyWrittenFor.current === loadId.current) return;
 
     const trackDuration = status.duration || currentTrack.duration || 0;
+
     const threshold = Math.min(
       HISTORY_MIN_SECONDS,
       trackDuration > 0 ? trackDuration * HISTORY_MIN_RATIO : HISTORY_MIN_SECONDS
@@ -358,6 +289,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     if (positionSecond >= threshold && positionSecond > 0) {
       historyWrittenFor.current = loadId.current;
       LibraryService.recordListen(currentTrack);
+      if (__DEV__) console.log('[history] logged', currentTrack.title);
     }
   }, [currentTrack, positionSecond, status.duration]);
 
@@ -387,9 +319,11 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         0,
         list.findIndex((t) => t.id === track.id)
       );
+
       queueRef.current.setTracks(list, startIndex, context?.label ?? '');
       bumpQueue();
       persistQueue();
+
       void loadCurrent({ autoPlay: true });
     },
     [bumpQueue, loadCurrent, persistQueue]
@@ -399,13 +333,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const track = queueRef.current.current ?? currentTrack;
     if (!track) return;
 
-    const isYtCurrent =
-      playMode.current === 'youtube' &&
-      track.provider === 'youtube' &&
-      youtubeController.getStatus().videoId === track.sourceId;
-    const isAudioCurrent = playMode.current === 'audio' && playbackEngine.trackId === track.id;
-
-    if (!isYtCurrent && !isAudioCurrent) {
+    if (playbackEngine.trackId !== track.id) {
       if (!queueRef.current.current) {
         queueRef.current.setTracks([track], 0, '');
         bumpQueue();
@@ -417,11 +345,6 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       return;
     }
 
-    if (playMode.current === 'youtube') {
-      if (status.isPlaying) youtubeController.pause();
-      else youtubeController.play();
-      return;
-    }
     if (status.isPlaying) playbackEngine.pause();
     else playbackEngine.play();
   }, [bumpQueue, currentTrack, loadCurrent, status.isPlaying]);
@@ -430,6 +353,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const nextTrack = queueRef.current.next(false);
     bumpQueue();
     persistQueue();
+
     if (!nextTrack) {
       void extendWithRelated();
       return;
@@ -439,10 +363,10 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   const previous = useCallback(() => {
     if (statusRef.current.position > 3) {
-      if (playMode.current === 'youtube') youtubeController.seek(0);
-      else void playbackEngine.seekTo(0);
+      void playbackEngine.seekTo(0);
       return;
     }
+
     queueRef.current.previous();
     bumpQueue();
     persistQueue();
@@ -450,10 +374,6 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   }, [bumpQueue, loadCurrent, persistQueue]);
 
   const seekTo = useCallback((seconds: number) => {
-    if (playMode.current === 'youtube') {
-      youtubeController.seek(seconds);
-      return;
-    }
     void playbackEngine.seekTo(seconds);
   }, []);
 
@@ -463,8 +383,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       const total = duration || currentTrack?.duration || 0;
       const target = position + deltaSeconds;
       const clamped = total > 0 ? Math.min(total, Math.max(0, target)) : Math.max(0, target);
-      if (playMode.current === 'youtube') youtubeController.seek(clamped);
-      else void playbackEngine.seekTo(clamped);
+      void playbackEngine.seekTo(clamped);
     },
     [currentTrack?.duration]
   );
@@ -479,6 +398,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const retry = useCallback(() => {
     const attempt = lastAttempt.current;
     if (!attempt) return;
+
     setError(null);
     MusicService.invalidateStream(attempt.track);
     void loadCurrent({ autoPlay: true, startPosition: attempt.position });
@@ -492,6 +412,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       queueRef.current.add(tracks);
       bumpQueue();
       persistQueue();
+
       if (wasEmpty) void loadCurrent({ autoPlay: true });
     },
     [bumpQueue, loadCurrent, persistQueue]
@@ -503,6 +424,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       queueRef.current.playNext(tracks);
       bumpQueue();
       persistQueue();
+
       if (wasEmpty) void loadCurrent({ autoPlay: true });
       else preloader.schedule(queueRef.current.peekNext());
     },
@@ -514,12 +436,11 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       const removedCurrent = queueRef.current.remove(trackId);
       bumpQueue();
       persistQueue();
+
       if (removedCurrent) {
         if (queueRef.current.current) void loadCurrent({ autoPlay: true });
         else {
           playbackEngine.stop();
-          youtubeController.stop();
-          playMode.current = 'audio';
           setCurrentTrack(null);
         }
       }
@@ -546,6 +467,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     (trackId: string) => {
       const track = queueRef.current.jumpTo(trackId);
       if (!track) return;
+
       bumpQueue();
       persistQueue();
       void loadCurrent({ autoPlay: true });
@@ -668,4 +590,5 @@ export const usePlayer = () => {
   return context;
 };
 
+/** Subscribe to playback position without re-rendering on every other change. */
 export const useProgress = () => useContext(ProgressContext);
