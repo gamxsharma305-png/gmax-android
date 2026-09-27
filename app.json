@@ -27,9 +27,11 @@
         "WAKE_LOCK",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "POST_NOTIFICATIONS",
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "plugins": [
@@ -42,6 +44,8 @@
         }
       ],
       "expo-asset",
+      "./plugins/withCoreLibraryDesugaring",
+      "./plugins/withJitpack",
       "./plugins/withAndroidAbis",
       "./plugins/withReleaseSigning"
     ],
