@@ -1,6 +1,6 @@
 # GMAX Android
 
-Source from your uploaded project zip (NOTE-based music player).
+Source from your uploaded project zip (GMAX-based music player).
 
 ## Status
 
