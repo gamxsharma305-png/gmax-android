@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as SystemUI from 'expo-system-ui';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { PlayerProvider } from './src/hooks/usePlayer';
@@ -14,6 +15,9 @@ export default function App() {
   const [showSplash, setShowSplash] = useState(true);
 
   useEffect(() => {
+    // Kill any system white window behind the app before GSplash paints
+    void SystemUI.setBackgroundColorAsync('#050707');
+
     if (__DEV__) {
       console.log(
         '[NoteNative] available:',
@@ -32,7 +36,7 @@ export default function App() {
             <View style={styles.appContainer}>
               <RootNavigator />
               <YouTubeHost />
-              <StatusBar style="light" />
+              <StatusBar style="light" backgroundColor="#050707" />
               {showSplash ? <GSplash onDone={() => setShowSplash(false)} /> : null}
             </View>
           </View>
