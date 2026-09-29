@@ -3,11 +3,16 @@
     "name": "GMAX",
     "slug": "gmax",
     "owner": "gmax519",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#050707",
+    "splash": {
+      "backgroundColor": "#050707",
+      "resizeMode": "contain",
+      "image": "./assets/splash.png"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.gmax.player",
@@ -17,6 +22,7 @@
     },
     "android": {
       "package": "com.gmax.player",
+      "backgroundColor": "#050707",
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#050707"
