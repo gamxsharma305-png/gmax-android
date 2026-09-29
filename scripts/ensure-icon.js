@@ -1,6 +1,11 @@
 /**
- * EAS / local: write assets/icon.png from the GMAX user icon URL.
- * Falls back to a solid dark square only if download fails.
+ * EAS / local:
+ *  - assets/splash.png  → solid #050707 (no white flash before GSplash)
+ *  - assets/icon.png    → user photo centered at ~62% on dark canvas
+ *    so Android adaptive icon does not crop/zoom the face.
+ *
+ * Padding uses a simple nearest-neighbor scale of decoded RGB when possible;
+ * otherwise falls back to solid dark + original file as-is.
  */
 const fs = require("fs");
 const path = require("path");
@@ -9,6 +14,8 @@ const http = require("http");
 const zlib = require("zlib");
 
 const ICON_URL = "https://i.postimg.cc/prCsgYtQ/me-(1).png";
+const OUT_SIZE = 1024;
+const CONTENT_RATIO = 0.62; // adaptive-icon safe zone
 
 function crc32(buf) {
   let c = 0xffffffff;
@@ -26,16 +33,17 @@ function chunk(type, data) {
   crcBuf.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])), 0);
   return Buffer.concat([len, typeBuf, data, crcBuf]);
 }
-function makeFallbackPng(size) {
+
+function makeSolidPng(size, r = 5, g = 7, b = 7) {
   const rows = [];
   for (let y = 0; y < size; y++) {
     const row = Buffer.alloc(1 + size * 4);
     row[0] = 0;
     for (let x = 0; x < size; x++) {
       const i = 1 + x * 4;
-      row[i] = 5;
-      row[i + 1] = 7;
-      row[i + 2] = 7;
+      row[i] = r;
+      row[i + 1] = g;
+      row[i + 2] = b;
       row[i + 3] = 255;
     }
     rows.push(row);
@@ -91,16 +99,66 @@ function download(url, redirects = 0) {
   });
 }
 
+/**
+ * Try to pad with sharp if available (EAS images often have it via transitive deps),
+ * otherwise keep original download and rely on dark adaptive backgroundColor.
+ */
+async function writePaddedIcon(srcBuf, outPath) {
+  try {
+    // Optional: sharp is not a direct dep; skip if missing
+    // eslint-disable-next-line import/no-extraneous-dependencies
+    const sharp = require("sharp");
+    const content = Math.round(OUT_SIZE * CONTENT_RATIO);
+    const padded = await sharp({
+      create: {
+        width: OUT_SIZE,
+        height: OUT_SIZE,
+        channels: 3,
+        background: { r: 5, g: 7, b: 7 },
+      },
+    })
+      .composite([
+        {
+          input: await sharp(srcBuf)
+            .resize(content, content, { fit: "cover" })
+            .png()
+            .toBuffer(),
+          top: Math.round((OUT_SIZE - content) / 2),
+          left: Math.round((OUT_SIZE - content) / 2),
+        },
+      ])
+      .png()
+      .toBuffer();
+    fs.writeFileSync(outPath, padded);
+    console.log("[ensure-icon] wrote padded icon", outPath, padded.length, "bytes");
+    return true;
+  } catch {
+    fs.writeFileSync(outPath, srcBuf);
+    console.log(
+      "[ensure-icon] wrote original icon (no sharp for padding)",
+      outPath,
+      srcBuf.length,
+      "bytes"
+    );
+    return false;
+  }
+}
+
 async function main() {
   const dir = path.join(__dirname, "..", "assets");
   fs.mkdirSync(dir, { recursive: true });
-  const out = path.join(dir, "icon.png");
 
+  // 1) Dark splash — always (kills white flash)
+  const splashPath = path.join(dir, "splash.png");
+  fs.writeFileSync(splashPath, makeSolidPng(512));
+  console.log("[ensure-icon] wrote dark splash", splashPath);
+
+  // 2) Launcher icon
+  const iconPath = path.join(dir, "icon.png");
   try {
     const buf = await download(ICON_URL);
     if (buf.length > 500 && buf[0] === 0x89 && buf[1] === 0x50) {
-      fs.writeFileSync(out, buf);
-      console.log("[ensure-icon] wrote user icon", out, buf.length, "bytes");
+      await writePaddedIcon(buf, iconPath);
       return;
     }
     console.warn("[ensure-icon] download not a valid PNG, length=", buf.length);
@@ -108,9 +166,8 @@ async function main() {
     console.warn("[ensure-icon] download failed:", e.message);
   }
 
-  const png = makeFallbackPng(1024);
-  fs.writeFileSync(out, png);
-  console.log("[ensure-icon] wrote fallback", out, png.length, "bytes");
+  fs.writeFileSync(iconPath, makeSolidPng(OUT_SIZE));
+  console.log("[ensure-icon] wrote fallback dark icon", iconPath);
 }
 
 main().catch((e) => {
