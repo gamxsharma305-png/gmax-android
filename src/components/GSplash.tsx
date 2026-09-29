@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   Animated,
   Easing,
@@ -6,8 +6,9 @@ import {
   StyleSheet,
   Text,
   View,
-  Dimensions,
+  useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, {
   Circle,
   Path,
@@ -21,7 +22,7 @@ import { COLORS, FONTS } from '../constants/theme';
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 const AnimatedG = Animated.createAnimatedComponent(G);
 
-/** Same path as website Splash.tsx */
+/** Same path as website Splash.tsx — fits inside viewBox with margin */
 const G_PATH = `M 88 42
 C 82 28 72 22 58 22
 C 38 22 24 36 24 58
@@ -46,8 +47,12 @@ type Props = {
 /**
  * Website-identical GMAX intro:
  * letter G path draws in → accent bar → title fades → scale out.
+ * Sized so the full G + title stay on-screen (no zoom / no cut-off).
  */
 export function GSplash({ onDone, minMs = 2800 }: Props) {
+  const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+
   const draw = useRef(new Animated.Value(0)).current;
   const guideOp = useRef(new Animated.Value(0)).current;
   const accentOp = useRef(new Animated.Value(0)).current;
@@ -146,7 +151,13 @@ export function GSplash({ onDone, minMs = 2800 }: Props) {
     outputRange: [STROKE_LEN, 0],
   });
 
-  const svgSize = Math.min(160, Dimensions.get('window').width * 0.42);
+  // Keep G logo fully visible — not zoomed, fits short phones too
+  const svgSize = Math.min(
+    128,
+    Math.round(width * 0.34),
+    Math.round(height * 0.18)
+  );
+  const gridSize = Math.round(svgSize * 1.35);
 
   return (
     <Pressable onPress={finish} style={StyleSheet.absoluteFill}>
@@ -156,14 +167,31 @@ export function GSplash({ onDone, minMs = 2800 }: Props) {
           {
             opacity: outOp,
             transform: [{ scale: outScale }],
+            paddingTop: insets.top,
+            paddingBottom: insets.bottom,
           },
         ]}
       >
-        <View style={styles.grid} pointerEvents="none" />
+        <View
+          style={[
+            styles.grid,
+            {
+              width: gridSize,
+              height: gridSize,
+              marginTop: -gridSize / 2,
+            },
+          ]}
+          pointerEvents="none"
+        />
 
         <View style={styles.stage}>
           <View style={[styles.svgWrap, { width: svgSize, height: svgSize }]}>
-            <Svg width={svgSize} height={svgSize} viewBox="0 0 120 120">
+            <Svg
+              width={svgSize}
+              height={svgSize}
+              viewBox="0 0 120 120"
+              preserveAspectRatio="xMidYMid meet"
+            >
               <Defs>
                 <LinearGradient id="gmaxGStroke" x1="24" y1="22" x2="92" y2="96">
                   <Stop offset="0" stopColor="#f0f0f0" />
@@ -218,7 +246,9 @@ export function GSplash({ onDone, minMs = 2800 }: Props) {
           </Animated.View>
         </View>
 
-        <Text style={styles.hint}>TAP TO SKIP</Text>
+        <Text style={[styles.hint, { bottom: Math.max(insets.bottom, 16) + 12 }]}>
+          TAP TO SKIP
+        </Text>
       </Animated.View>
     </Pressable>
   );
@@ -231,38 +261,39 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#050707',
+    overflow: 'hidden',
   },
   grid: {
     position: 'absolute',
-    width: 220,
-    height: 220,
-    top: '38%',
+    top: '50%',
     alignSelf: 'center',
-    marginTop: -110,
     opacity: 0.55,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.06)',
   },
   stage: {
     alignItems: 'center',
-    gap: 28,
+    justifyContent: 'center',
+    gap: 22,
   },
   svgWrap: {
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'visible',
   },
   copy: {
     alignItems: 'center',
+    paddingHorizontal: 24,
   },
   name: {
     fontFamily: FONTS.bold,
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: '600',
-    letterSpacing: 4.5,
+    letterSpacing: 4,
     color: COLORS.text.primary,
   },
   tag: {
-    marginTop: 10,
+    marginTop: 8,
     fontFamily: FONTS.medium,
     fontSize: 10,
     fontWeight: '500',
@@ -272,7 +303,6 @@ const styles = StyleSheet.create({
   },
   hint: {
     position: 'absolute',
-    bottom: 28,
     fontFamily: FONTS.medium,
     fontSize: 10,
     letterSpacing: 2,
