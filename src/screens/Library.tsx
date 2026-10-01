@@ -79,7 +79,6 @@ export default function LibraryScreen() {
     [loadingGenre, playTrack, playlists, createPlaylist]
   );
 
-  // My Playlist data (user playlists) — shown FIRST
   const data = [
     { id: 'liked', name: 'Liked Songs', count: likedPlaylist.tracks.length, cover: null },
     ...ordered.map((p) => ({
@@ -90,7 +89,6 @@ export default function LibraryScreen() {
     })),
   ];
 
-  // Auto Playlist section — shown BELOW user playlists (footer)
   const ListFooter = (
     <View style={{ marginTop: SIZES.lg }}>
       <Text style={styles.sectionLabel}>AUTO PLAYLIST</Text>
@@ -123,9 +121,7 @@ export default function LibraryScreen() {
     </View>
   );
 
-  const ListHeader = (
-    <Text style={styles.sectionLabel}>MY PLAYLIST</Text>
-  );
+  const ListHeader = <Text style={styles.sectionLabel}>MY PLAYLIST</Text>;
 
   return (
     <View style={styles.container}>
@@ -179,7 +175,7 @@ export default function LibraryScreen() {
               {item.cover ? (
                 <Image source={{ uri: item.cover }} style={styles.coverImg} />
               ) : item.id === 'liked' ? (
-                <Heart size={22} color={COLORS.accent} fill={COLORS.accent} />
+                <Heart size={22} color={COLORS.accent.green} fill={COLORS.accent.green} />
               ) : (
                 <ListMusic size={22} color={COLORS.text.secondary} />
               )}
