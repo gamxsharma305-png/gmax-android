@@ -3,6 +3,7 @@ import {
   Keyboard,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -13,7 +14,12 @@ import { ChevronLeft } from 'lucide-react-native';
 import Constants from 'expo-constants';
 import { useNavigation } from '@react-navigation/native';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
-import { Gender } from '../services/LibraryService';
+import {
+  AppLanguage,
+  AudioQuality,
+  Gender,
+  ThemeMode,
+} from '../services/LibraryService';
 import { useLibrary } from '../hooks/useLibrary';
 
 const GENDERS: { value: Gender; label: string }[] = [
@@ -22,10 +28,31 @@ const GENDERS: { value: Gender; label: string }[] = [
   { value: 'unspecified', label: 'Prefer not to say' },
 ];
 
+const THEME_MODES: { value: ThemeMode; label: string }[] = [
+  { value: 'dark', label: 'Dark' },
+  { value: 'light', label: 'Light' },
+  { value: 'system', label: 'System' },
+];
+
+const QUALITIES: { value: AudioQuality; label: string }[] = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'high', label: 'High' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'low', label: 'Low' },
+];
+
+const LANGUAGES: { value: AppLanguage; label: string }[] = [
+  { value: 'en', label: 'English' },
+  { value: 'hi', label: 'Hindi' },
+];
+
+const ACCENTS = ['#1db954', '#3b82f6', '#a855f7', '#f59e0b', '#ef4444', '#ec4899'];
+
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { profile, saveProfile, history, playlists, liked } = useLibrary();
+  const { profile, saveProfile, history, playlists, liked, settings, updateSettings } =
+    useLibrary();
 
   const [name, setName] = useState(profile.name);
 
@@ -107,6 +134,133 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        <Text style={styles.sectionLabel}>PREFERENCES</Text>
+        <View style={styles.card}>
+          <Text style={styles.fieldLabel}>THEME MODE</Text>
+          <View style={styles.pillRow}>
+            {THEME_MODES.map((opt) => {
+              const active = (settings.themeMode ?? 'dark') === opt.value;
+              return (
+                <TouchableOpacity
+                  key={opt.value}
+                  style={[styles.pill, active && styles.pillActive]}
+                  onPress={() => updateSettings({ themeMode: opt.value })}
+                >
+                  <Text style={[styles.pillText, active && styles.pillTextActive]}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>ACCENT COLOR</Text>
+          <View style={styles.accentRow}>
+            {ACCENTS.map((c) => {
+              const active = (settings.accentColor ?? '#1db954').toLowerCase() === c;
+              return (
+                <TouchableOpacity
+                  key={c}
+                  onPress={() => updateSettings({ accentColor: c })}
+                  style={[
+                    styles.accentDot,
+                    { backgroundColor: c },
+                    active && styles.accentDotActive,
+                  ]}
+                />
+              );
+            })}
+          </View>
+
+          <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>LANGUAGE</Text>
+          <View style={styles.pillRow}>
+            {LANGUAGES.map((opt) => {
+              const active = (settings.language ?? 'en') === opt.value;
+              return (
+                <TouchableOpacity
+                  key={opt.value}
+                  style={[styles.pill, active && styles.pillActive]}
+                  onPress={() => updateSettings({ language: opt.value })}
+                >
+                  <Text style={[styles.pillText, active && styles.pillTextActive]}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>AUDIO QUALITY</Text>
+          <View style={styles.pillRow}>
+            {QUALITIES.map((opt) => {
+              const active = (settings.audioQuality ?? 'high') === opt.value;
+              return (
+                <TouchableOpacity
+                  key={opt.value}
+                  style={[styles.pill, active && styles.pillActive]}
+                  onPress={() => updateSettings({ audioQuality: opt.value })}
+                >
+                  <Text style={[styles.pillText, active && styles.pillTextActive]}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <View style={styles.toggleRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Show quality badge</Text>
+              <Text style={styles.rowHint}>Show stream quality on player</Text>
+            </View>
+            <Switch
+              value={!!settings.showQualityBadge}
+              onValueChange={(v) => updateSettings({ showQualityBadge: v })}
+              trackColor={{ false: COLORS.surfaceLight, true: COLORS.accent.green }}
+              thumbColor="#fff"
+            />
+          </View>
+          <Divider />
+          <View style={styles.toggleRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Gapless playback</Text>
+              <Text style={styles.rowHint}>Seamless track transitions</Text>
+            </View>
+            <Switch
+              value={settings.gapless !== false}
+              onValueChange={(v) => updateSettings({ gapless: v })}
+              trackColor={{ false: COLORS.surfaceLight, true: COLORS.accent.green }}
+              thumbColor="#fff"
+            />
+          </View>
+          <Divider />
+          <View style={styles.toggleRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Crossfade</Text>
+              <Text style={styles.rowHint}>Experimental</Text>
+            </View>
+            <Switch
+              value={!!settings.crossfade}
+              onValueChange={(v) => updateSettings({ crossfade: v })}
+              trackColor={{ false: COLORS.surfaceLight, true: COLORS.accent.green }}
+              thumbColor="#fff"
+            />
+          </View>
+          <Divider />
+          <View style={styles.toggleRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Autoplay related</Text>
+              <Text style={styles.rowHint}>Continue with similar tracks</Text>
+            </View>
+            <Switch
+              value={settings.autoplayRelated !== false}
+              onValueChange={(v) => updateSettings({ autoplayRelated: v })}
+              trackColor={{ false: COLORS.surfaceLight, true: COLORS.accent.green }}
+              thumbColor="#fff"
+            />
+          </View>
+        </View>
+
         <Text style={styles.sectionLabel}>FEATURES</Text>
         <View style={styles.card}>
           <Row label="Background audio" value="On" />
@@ -114,8 +268,6 @@ export default function SettingsScreen() {
           <Row label="YouTube + Saavn + Audius" value="On" />
           <Divider />
           <Row label="Auto playlists" value="On" />
-          <Divider />
-          <Row label="Offline queue" value="On" />
           <Divider />
           <Row label="Lock screen controls" value="On" />
         </View>
@@ -129,7 +281,7 @@ export default function SettingsScreen() {
           <Row label="Made by" value="Gmax" />
         </View>
 
-        <Text style={styles.footer}>GMAX</Text>
+        <Text style={styles.footer}>mad by Gmax</Text>
       </ScrollView>
     </View>
   );
@@ -227,6 +379,25 @@ const styles = StyleSheet.create({
   pillActive: { backgroundColor: COLORS.text.primary, borderColor: COLORS.text.primary },
   pillText: { fontFamily: FONTS.medium, fontSize: 13, color: COLORS.text.secondary },
   pillTextActive: { color: COLORS.background },
+  accentRow: { flexDirection: 'row', gap: 12, flexWrap: 'wrap' },
+  accentDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  accentDotActive: {
+    borderColor: '#fff',
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: SIZES.sm + 2,
+    gap: SIZES.md,
+    marginTop: SIZES.sm,
+  },
   statsRow: { flexDirection: 'row', justifyContent: 'space-around' },
   stat: { alignItems: 'center' },
   statValue: { fontFamily: FONTS.bold, fontSize: 22, color: COLORS.text.primary },
@@ -244,12 +415,13 @@ const styles = StyleSheet.create({
     paddingVertical: SIZES.sm + 2,
   },
   rowLabel: { fontFamily: FONTS.regular, fontSize: 15, color: COLORS.text.secondary },
+  rowHint: { fontFamily: FONTS.regular, fontSize: 12, color: COLORS.text.muted, marginTop: 2 },
   rowValue: { fontFamily: FONTS.medium, fontSize: 15, color: COLORS.text.primary },
   divider: { height: 1, backgroundColor: COLORS.glassBorder },
   footer: {
     fontFamily: FONTS.medium,
     fontSize: 12,
-    letterSpacing: 4,
+    letterSpacing: 2,
     color: COLORS.text.muted,
     textAlign: 'center',
     marginTop: SIZES.xxl,

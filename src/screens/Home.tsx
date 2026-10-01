@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Search, Play, Heart, Compass, Moon, Target, User } from 'lucide-react-native';
+import { Search, Play, Heart, ListMusic, Moon, Target, User } from 'lucide-react-native';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { GlassCard } from '../components/common/GlassCard';
 import { TrackRow } from '../components/lists/TrackRow';
@@ -22,9 +22,10 @@ import { MiniPlayer } from '../components/player/MiniPlayer';
 import { StatusBarScrim } from '../components/common/StatusBarScrim';
 import { useNavigation } from '@react-navigation/native';
 
+/** Website-parity quick actions: Liked | Playlist | Chill | Focus */
 const ACTIONS = [
   { id: 'liked', label: 'Liked', Icon: Heart, query: null as string | null },
-  { id: 'discover', label: 'Discover', Icon: Compass, query: 'discover new music' },
+  { id: 'playlist', label: 'Playlist', Icon: ListMusic, query: 'best playlists songs mix' },
   { id: 'chill', label: 'Chill', Icon: Moon, query: 'chill relaxing songs' },
   { id: 'focus', label: 'Focus', Icon: Target, query: 'focus instrumental concentration' },
 ] as const;
@@ -79,6 +80,10 @@ export default function HomeScreen() {
         if (liked.length) onPlay(liked[0], liked);
         return;
       }
+      if (id === 'playlist') {
+        navigation.navigate('LibraryTab' as never);
+        return;
+      }
       if (!query) return;
       setPendingAction(id);
       try {
@@ -90,7 +95,7 @@ export default function HomeScreen() {
         setPendingAction(null);
       }
     },
-    [liked, onPlay]
+    [liked, onPlay, navigation]
   );
 
   const list = hasRecents ? recentlyPlayed : starter;
@@ -102,7 +107,7 @@ export default function HomeScreen() {
           <View>
             <Text style={styles.greeting}>{greetingFor(new Date().getHours())}</Text>
             {!!profile.name && <Text style={styles.name}>{profile.name}.</Text>}
-            <Text style={styles.madeBy}>GMAX</Text>
+            <Text style={styles.madeBy}>mad by Gmax</Text>
           </View>
           <TouchableOpacity
             style={styles.avatar}
@@ -216,7 +221,7 @@ const styles = StyleSheet.create({
   madeBy: {
     fontFamily: FONTS.medium,
     fontSize: 10,
-    letterSpacing: 3,
+    letterSpacing: 1.5,
     color: COLORS.text.muted,
     marginTop: 4,
   },
