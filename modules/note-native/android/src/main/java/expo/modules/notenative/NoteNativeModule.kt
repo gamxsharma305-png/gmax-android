@@ -3,8 +3,6 @@ package expo.modules.notenative
 import android.os.Build
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.exceptions.ContentNotAvailableException
@@ -16,6 +14,8 @@ import org.schabi.newpipe.extractor.stream.StreamInfo
 /**
  * Native YouTube audio extractor via NewPipeExtractor.
  * Returns audio URL + User-Agent so expo-audio can play in foreground and background.
+ *
+ * AsyncFunction already runs off the JS thread — do NOT wrap in withContext/suspend.
  */
 class NoteNativeModule : Module() {
 
@@ -46,9 +46,7 @@ class NoteNativeModule : Module() {
     }
 
     AsyncFunction("resolveYouTubeStream") { videoId: String ->
-      withContext(Dispatchers.IO) {
-        resolve(videoId)
-      }
+      resolve(videoId)
     }
   }
 
@@ -70,7 +68,6 @@ class NoteNativeModule : Module() {
         return fail("no_audio_stream", "No audio stream found for this video")
       }
 
-      // Prefer m4a/mp4, then highest bitrate
       val best = audioStreams.sortedWith(
         compareByDescending<AudioStream> { stream ->
           val name = stream.format?.name?.lowercase() ?: ""

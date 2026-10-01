@@ -51,7 +51,6 @@ try {
   const dir = path.join(__dirname, "assets");
   fs.mkdirSync(dir, { recursive: true });
 
-  // Always ensure a pure-dark splash (kills white flash before JS GSplash)
   const splashPath = path.join(dir, "splash.png");
   if (!fs.existsSync(splashPath) || fs.statSync(splashPath).size < 100) {
     fs.writeFileSync(splashPath, makeDarkPng(512));
@@ -63,7 +62,10 @@ try {
   }
 } catch (e) {}
 
+const appJson = require("./app.json");
+
 module.exports = {
+  ...appJson.expo,
   name: "GMAX",
   slug: "gmax",
   owner: "gmax519",
@@ -72,12 +74,6 @@ module.exports = {
   userInterfaceStyle: "dark",
   icon: "./assets/icon.png",
   backgroundColor: "#050707",
-  // Native splash = solid dark only. GMAX draw animation starts in JS (GSplash).
-  splash: {
-    backgroundColor: "#050707",
-    resizeMode: "contain",
-    image: "./assets/splash.png",
-  },
   ios: {
     supportsTablet: true,
     bundleIdentifier: "com.gmax.player",
@@ -85,10 +81,9 @@ module.exports = {
   },
   android: {
     package: "com.gmax.player",
-    versionCode: 26,
+    versionCode: 27,
     backgroundColor: "#050707",
     adaptiveIcon: {
-      // Padded icon from ensure-icon.js (safe zone) — not full-bleed zoom
       foregroundImage: "./assets/icon.png",
       backgroundColor: "#050707",
     },
@@ -121,6 +116,7 @@ module.exports = {
     "./plugins/withReleaseSigning",
   ],
   extra: {
+    ...(appJson.expo && appJson.expo.extra ? appJson.expo.extra : {}),
     eas: {
       projectId: "d0b9f8bc-3fe4-48a4-97b8-52a2476cd528",
     },
