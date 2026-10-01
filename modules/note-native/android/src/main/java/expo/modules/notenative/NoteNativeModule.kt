@@ -5,39 +5,43 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.ServiceList
+import org.schabi.newpipe.extractor.exceptions.AccountTerminatedException
+import org.schabi.newpipe.extractor.exceptions.AgeRestrictedContentException
 import org.schabi.newpipe.extractor.exceptions.ContentNotAvailableException
+import org.schabi.newpipe.extractor.exceptions.ContentNotSupportedException
 import org.schabi.newpipe.extractor.exceptions.ExtractionException
+import org.schabi.newpipe.extractor.exceptions.GeographicRestrictionException
+import org.schabi.newpipe.extractor.exceptions.PaidContentException
+import org.schabi.newpipe.extractor.exceptions.PrivateContentException
+import org.schabi.newpipe.extractor.exceptions.ReCaptchaException
+import org.schabi.newpipe.extractor.exceptions.SignInConfirmNotBotException
+import org.schabi.newpipe.extractor.exceptions.YoutubeMusicPremiumContentException
+import org.schabi.newpipe.extractor.localization.ContentCountry
 import org.schabi.newpipe.extractor.localization.Localization
 import org.schabi.newpipe.extractor.stream.AudioStream
+import org.schabi.newpipe.extractor.stream.DeliveryMethod
 import org.schabi.newpipe.extractor.stream.StreamInfo
+import org.schabi.newpipe.extractor.stream.StreamType
+import java.io.IOException
 
 /**
- * Native YouTube audio extractor via NewPipeExtractor.
- * Returns audio URL + User-Agent so expo-audio can play in foreground and background.
- *
- * AsyncFunction already runs off the JS thread — do NOT wrap in withContext/suspend.
+ * Native YouTube audio via NewPipeExtractor.
+ * Returns progressive HTTP audio URL + User-Agent for expo-audio (background OK).
  */
 class NoteNativeModule : Module() {
 
-  companion object {
-    @Volatile
-    private var initialized = false
+  private companion object {
+    val initLock = Any()
 
-    private fun ensureInit() {
-      if (initialized) return
-      synchronized(this) {
-        if (initialized) return
-        NewPipe.init(NoteNativeDownloader.getInstance(), Localization.DEFAULT)
-        initialized = true
-      }
-    }
+    @Volatile
+    var initialized = false
   }
 
   override fun definition() = ModuleDefinition {
     Name("NoteNative")
 
     Function("getPlatformInfo") {
-      mapOf(
+      return@Function mapOf(
         "platform" to "android",
         "native" to true,
         "androidSdkInt" to Build.VERSION.SDK_INT,
@@ -45,93 +49,104 @@ class NoteNativeModule : Module() {
       )
     }
 
+    // AsyncFunction runs off the JS thread (blocking network OK). No withContext.
     AsyncFunction("resolveYouTubeStream") { videoId: String ->
-      resolve(videoId)
+      resolveYouTubeStream(videoId)
     }
   }
 
-  private fun resolve(videoId: String): Map<String, Any?> {
+  private fun ensureInitialized() {
+    if (initialized) return
+    synchronized(initLock) {
+      if (initialized) return
+      NewPipe.init(
+        NoteNativeDownloader(),
+        Localization("en", "US"),
+        ContentCountry("US")
+      )
+      initialized = true
+    }
+  }
+
+  private fun resolveYouTubeStream(videoId: String): Map<String, Any?> {
     val id = videoId.trim()
-    if (id.isEmpty() || id.length < 6) {
-      return fail("invalid_id", "Invalid YouTube video id")
+    if (id.isBlank() || id.length < 6) {
+      return failure("invalid_id", "No video id supplied")
     }
 
     return try {
-      ensureInit()
+      ensureInitialized()
 
-      val watchUrl =
+      val url =
         if (id.startsWith("http")) id else "https://www.youtube.com/watch?v=$id"
-      val info = StreamInfo.getInfo(ServiceList.YouTube, watchUrl)
+      val info = StreamInfo.getInfo(ServiceList.YouTube, url)
 
-      val audioStreams: List<AudioStream> = info.audioStreams ?: emptyList()
-      if (audioStreams.isEmpty()) {
-        return fail("no_audio_stream", "No audio stream found for this video")
+      when (info.streamType) {
+        StreamType.LIVE_STREAM,
+        StreamType.AUDIO_LIVE_STREAM ->
+          return failure("live_stream", "Live streams are not supported yet")
+        StreamType.NONE ->
+          return failure("unsupported", "No playable stream for this item")
+        else -> Unit
       }
 
-      val best = audioStreams.sortedWith(
-        compareByDescending<AudioStream> { stream ->
-          val name = stream.format?.name?.lowercase() ?: ""
-          when {
-            "m4a" in name || "mp4" in name -> 2
-            "webm" in name -> 1
-            else -> 0
-          }
-        }.thenByDescending { it.averageBitrate }
-      ).first()
-
-      val streamUrl = best.url
-      if (streamUrl.isNullOrBlank()) {
-        return fail("no_audio_stream", "Audio stream URL empty")
-      }
-
-      val formatName = best.format?.name?.lowercase() ?: ""
-      val mime = if ("webm" in formatName) "audio/webm" else "audio/mp4"
+      val best = bestProgressiveAudio(info.audioStreams)
+        ?: return failure(
+          "no_audio_stream",
+          "No progressive audio stream available for this track"
+        )
 
       mapOf(
         "ok" to true,
-        "url" to streamUrl,
-        "mimeType" to mime,
+        "url" to best.content,
+        "mimeType" to best.format?.mimeType,
         "bitrate" to best.averageBitrate,
-        "durationSeconds" to info.duration.toDouble(),
-        "title" to (info.name ?: ""),
-        "uploader" to (info.uploaderName ?: ""),
-        "streamType" to "audio",
-        "extractor" to "NewPipeExtractor",
+        "durationSeconds" to info.duration,
+        "title" to info.name,
+        "uploader" to info.uploaderName,
+        "streamType" to info.streamType.name,
+        "extractor" to "NewPipeExtractor/v0.26.5",
         "userAgent" to NoteNativeDownloader.USER_AGENT
       )
-    } catch (e: ContentNotAvailableException) {
-      fail("unavailable", e.message ?: "Content not available")
-    } catch (e: ExtractionException) {
-      val msg = e.message ?: "Extraction failed"
-      val reason = when {
-        msg.contains("private", true) -> "private_content"
-        msg.contains("age", true) -> "age_restricted"
-        msg.contains("geo", true) || msg.contains("country", true) -> "geo_restricted"
-        msg.contains("login", true) || msg.contains("sign in", true) -> "sign_in_required"
-        msg.contains("live", true) -> "live_stream"
-        else -> "extraction_failed"
-      }
-      fail(reason, msg, e.javaClass.simpleName)
-    } catch (e: java.net.UnknownHostException) {
-      fail("network", e.message ?: "Network error")
-    } catch (e: java.io.IOException) {
-      fail("network", e.message ?: "IO error")
-    } catch (e: Exception) {
-      fail("unknown", e.message ?: e.javaClass.simpleName, e.javaClass.simpleName)
+    } catch (e: Throwable) {
+      classify(e)
     }
   }
 
-  private fun fail(
-    reason: String,
-    message: String,
-    exception: String? = null
-  ): Map<String, Any?> {
-    val map = mutableMapOf<String, Any?>(
+  /** expo-audio needs progressive HTTP — not DASH/HLS. */
+  private fun bestProgressiveAudio(streams: List<AudioStream>?): AudioStream? =
+    streams
+      ?.filter { it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP }
+      ?.filter { it.isUrl && !it.content.isNullOrBlank() }
+      ?.maxByOrNull { it.averageBitrate }
+
+  private fun classify(e: Throwable): Map<String, Any?> {
+    val message = e.message ?: e.javaClass.simpleName
+
+    val reason = when (e) {
+      is GeographicRestrictionException -> "geo_restricted"
+      is AgeRestrictedContentException -> "age_restricted"
+      is PaidContentException,
+      is YoutubeMusicPremiumContentException -> "paid_content"
+      is PrivateContentException -> "private_content"
+      is AccountTerminatedException -> "unavailable"
+      is SignInConfirmNotBotException -> "sign_in_required"
+      is ReCaptchaException -> "rate_limited"
+      is ContentNotSupportedException -> "unsupported"
+      is ContentNotAvailableException -> "unavailable"
+      is ExtractionException -> "extraction_failed"
+      is IOException -> "network"
+      else -> "unknown"
+    }
+
+    return failure(reason, message, e.javaClass.name)
+  }
+
+  private fun failure(reason: String, message: String, exception: String? = null) =
+    mapOf(
       "ok" to false,
       "reason" to reason,
-      "message" to message
+      "message" to message,
+      "exception" to exception
     )
-    if (exception != null) map["exception"] = exception
-    return map
-  }
 }

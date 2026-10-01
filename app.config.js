@@ -2,7 +2,6 @@ const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
 
-/** Solid #050707 PNG so native splash is never white. */
 function makeDarkPng(size) {
   function crc32(buf) {
     let c = 0xffffffff;
@@ -50,12 +49,10 @@ function makeDarkPng(size) {
 try {
   const dir = path.join(__dirname, "assets");
   fs.mkdirSync(dir, { recursive: true });
-
   const splashPath = path.join(dir, "splash.png");
   if (!fs.existsSync(splashPath) || fs.statSync(splashPath).size < 100) {
     fs.writeFileSync(splashPath, makeDarkPng(512));
   }
-
   const iconPath = path.join(dir, "icon.png");
   if (!fs.existsSync(iconPath) || fs.statSync(iconPath).size < 100) {
     fs.writeFileSync(iconPath, makeDarkPng(1024));
@@ -69,7 +66,7 @@ module.exports = {
   name: "GMAX",
   slug: "gmax",
   owner: "gmax519",
-  version: "1.1.1",
+  version: "1.1.2",
   orientation: "portrait",
   userInterfaceStyle: "dark",
   icon: "./assets/icon.png",
@@ -81,7 +78,7 @@ module.exports = {
   },
   android: {
     package: "com.gmax.player",
-    versionCode: 27,
+    versionCode: 28,
     backgroundColor: "#050707",
     adaptiveIcon: {
       foregroundImage: "./assets/icon.png",

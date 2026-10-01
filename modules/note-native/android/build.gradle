@@ -4,34 +4,33 @@ plugins {
 }
 
 group = 'expo.modules.notenative'
-version = '0.2.0'
+version = '0.2.1'
 
 android {
   namespace "expo.modules.notenative"
   defaultConfig {
-    versionCode 2
-    versionName "0.2.0"
-  }
-  lintOptions {
-    abortOnError false
+    versionCode 3
+    versionName "0.2.1"
   }
   compileOptions {
+    // NewPipeExtractor uses java.time (API 26+). App minSdk 24 needs desugar.
+    coreLibraryDesugaringEnabled true
     sourceCompatibility JavaVersion.VERSION_17
     targetCompatibility JavaVersion.VERSION_17
   }
   kotlinOptions {
     jvmTarget = "17"
   }
+  lintOptions {
+    abortOnError false
+  }
 }
 
-// Do NOT declare project-level repositories here.
-// Gradle 9 PREFER_SETTINGS ignores them and they conflict with settings.gradle.
-// JitPack is added ONLY in settings.gradle via plugins/withJitpack.js
-// with content filter for com.github.TeamNewPipe*.
+// JitPack is added in settings.gradle via plugins/withJitpack.js
+// (content filter for com.github.TeamNewPipe only).
 
 dependencies {
-  // Native YouTube stream extraction (resolved via settings.gradle JitPack filter)
-  implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.24.3")
-  // OkHttp from Maven Central (not JitPack)
-  implementation("com.squareup.okhttp3:okhttp:4.12.0")
+  // Match working NOTE app — v0.24.3 is too old for current YouTube.
+  implementation 'com.github.TeamNewPipe:NewPipeExtractor:v0.26.5'
+  coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
 }

@@ -22,7 +22,6 @@ import { COLORS, FONTS } from '../constants/theme';
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 const AnimatedG = Animated.createAnimatedComponent(G);
 
-/** Same path as website Splash.tsx — fits inside viewBox with margin */
 const G_PATH = `M 88 42
 C 82 28 72 22 58 22
 C 38 22 24 36 24 58
@@ -35,19 +34,15 @@ L 62 58`;
 
 const ACCENT_PATH = 'M 62 54 L 92 54 L 92 62 L 62 62 Z';
 
-/** Stroke length used on website CSS (stroke-dasharray: 320) */
 const STROKE_LEN = 320;
 
 type Props = {
   onDone: () => void;
-  /** Minimum time splash stays visible (ms) — website default 2800 */
   minMs?: number;
 };
 
 /**
- * Website-identical GMAX intro:
- * letter G path draws in → accent bar → title fades → scale out.
- * Sized so the full G + title stay on-screen (no zoom / no cut-off).
+ * GMAX intro — same draw as website, fully on-screen (not cut / not over-zoomed).
  */
 export function GSplash({ onDone, minMs = 2800 }: Props) {
   const { width, height } = useWindowDimensions();
@@ -151,13 +146,9 @@ export function GSplash({ onDone, minMs = 2800 }: Props) {
     outputRange: [STROKE_LEN, 0],
   });
 
-  // Keep G logo fully visible — not zoomed, fits short phones too
-  const svgSize = Math.min(
-    128,
-    Math.round(width * 0.34),
-    Math.round(height * 0.18)
-  );
-  const gridSize = Math.round(svgSize * 1.35);
+  // Balanced size: readable G, full path visible on all phones
+  const svgSize = Math.min(150, Math.round(width * 0.38), Math.round(height * 0.22));
+  const gridSize = Math.round(svgSize * 1.4);
 
   return (
     <Pressable onPress={finish} style={StyleSheet.absoluteFill}>
@@ -274,7 +265,7 @@ const styles = StyleSheet.create({
   stage: {
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 22,
+    gap: 24,
   },
   svgWrap: {
     alignItems: 'center',
@@ -287,13 +278,13 @@ const styles = StyleSheet.create({
   },
   name: {
     fontFamily: FONTS.bold,
-    fontSize: 28,
+    fontSize: 30,
     fontWeight: '600',
-    letterSpacing: 4,
+    letterSpacing: 4.2,
     color: COLORS.text.primary,
   },
   tag: {
-    marginTop: 8,
+    marginTop: 10,
     fontFamily: FONTS.medium,
     fontSize: 10,
     fontWeight: '500',
