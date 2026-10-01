@@ -25,12 +25,24 @@ export type ResolverEndpoint = {
   kind: 'invidious' | 'piped' | 'custom';
 };
 
+export type ThemeMode = 'dark' | 'light' | 'system';
+export type AudioQuality = 'auto' | 'high' | 'medium' | 'low';
+export type AppLanguage = 'en' | 'hi';
+
 export type AppSettings = {
   profile: UserProfile;
   resolverEndpoints: ResolverEndpoint[];
   volume: number;
   preferAudioOnly: boolean;
   autoplayRelated: boolean;
+  /** Website-parity preferences */
+  themeMode: ThemeMode;
+  accentColor: string;
+  language: AppLanguage;
+  audioQuality: AudioQuality;
+  showQualityBadge: boolean;
+  gapless: boolean;
+  crossfade: boolean;
 };
 
 /** Public mirrors used when user has not added any. Required for YouTube audio. */
@@ -49,6 +61,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
   volume: 1,
   preferAudioOnly: true,
   autoplayRelated: true,
+  themeMode: 'dark',
+  accentColor: '#1db954',
+  language: 'en',
+  audioQuality: 'high',
+  showQualityBadge: false,
+  gapless: true,
+  crossfade: false,
 };
 
 export type HistoryEntry = {
@@ -64,6 +83,7 @@ export type SavedPlaybackState = {
 
 const MAX_RECENTS = 50;
 const MAX_HISTORY = 300;
+const OFFLINE_PLAYLIST_NAME = 'Downloads';
 
 class LibraryServiceImpl {
   private liked: Track[] = [];
@@ -97,7 +117,6 @@ class LibraryServiceImpl {
     this.recents = Array.isArray(recents) ? recents : [];
     const stored = settings ?? {};
 
-    // Merge stored settings; if endpoints missing/empty, seed working defaults
     const storedEndpoints = Array.isArray(stored.resolverEndpoints)
       ? stored.resolverEndpoints.filter((e) => e && typeof e.url === 'string' && e.url.startsWith('http'))
       : [];
@@ -110,7 +129,6 @@ class LibraryServiceImpl {
         storedEndpoints.length > 0 ? storedEndpoints : DEFAULT_RESOLVER_ENDPOINTS,
     };
 
-    // Persist seeded endpoints so next launch and settings UI stay in sync
     if (storedEndpoints.length === 0) {
       void writeJson(STORAGE_KEYS.settings, this.settings);
     }
@@ -249,7 +267,6 @@ class LibraryServiceImpl {
     });
   }
 
-  /** Reorder tracks in a playlist (drag up/down). */
   reorderPlaylistTracks(playlistId: string, fromIndex: number, toIndex: number): void {
     const playlist = this.getPlaylist(playlistId);
     if (!playlist) return;
@@ -266,6 +283,27 @@ class LibraryServiceImpl {
     const [item] = tracks.splice(fromIndex, 1);
     tracks.splice(toIndex, 0, item);
     this.updatePlaylist(playlistId, { tracks });
+  }
+
+  /** Save track into local Downloads playlist (offline / download section). */
+  saveOffline(track: Track): { playlistId: string; alreadyHad: boolean } {
+    let pl = this.playlists.find((p) => p.name === OFFLINE_PLAYLIST_NAME);
+    if (!pl) {
+      pl = this.createPlaylist(OFFLINE_PLAYLIST_NAME, {
+        description: 'Tracks saved for offline',
+        tracks: [track],
+        coverImageUrl: track.albumImageUrl,
+      });
+      return { playlistId: pl.id, alreadyHad: false };
+    }
+    const had = pl.tracks.some((t) => t.id === track.id);
+    if (!had) this.addToPlaylist(pl.id, track);
+    return { playlistId: pl.id, alreadyHad: had };
+  }
+
+  isOffline(trackId: string): boolean {
+    const pl = this.playlists.find((p) => p.name === OFFLINE_PLAYLIST_NAME);
+    return !!pl?.tracks.some((t) => t.id === trackId);
   }
 
   private persistPlaylists(): void {
@@ -367,7 +405,6 @@ class LibraryServiceImpl {
   }
 
   updateSettings(patch: Partial<AppSettings>): AppSettings {
-    // Never allow clearing all endpoints — fall back to defaults
     if (patch.resolverEndpoints !== undefined) {
       const next = patch.resolverEndpoints.filter(
         (e) => e && typeof e.url === 'string' && e.url.startsWith('http')
@@ -379,6 +416,7 @@ class LibraryServiceImpl {
     }
     this.settings = { ...this.settings, ...patch };
     void writeJson(STORAGE_KEYS.settings, this.settings);
+    this.notifyChanged();
     return this.getSettings();
   }
 }
