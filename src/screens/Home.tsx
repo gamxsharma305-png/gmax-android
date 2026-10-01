@@ -26,8 +26,20 @@ import { useNavigation } from '@react-navigation/native';
 const ACTIONS = [
   { id: 'liked', label: 'Liked', Icon: Heart, query: null as string | null },
   { id: 'playlist', label: 'Playlist', Icon: ListMusic, query: 'best playlists songs mix' },
-  { id: 'chill', label: 'Chill', Icon: Moon, query: 'chill relaxing songs' },
-  { id: 'focus', label: 'Focus', Icon: Target, query: 'focus instrumental concentration' },
+  {
+    id: 'chill',
+    label: 'Chill',
+    Icon: Moon,
+    // Hindi lo-fi / soft romantic — Arijit & similar
+    query: 'Arijit Singh lofi hindi songs soft romantic',
+  },
+  {
+    id: 'focus',
+    label: 'Focus',
+    Icon: Target,
+    // Punjabi gangster / hardcore — Sidhu, Subh, Karan Aujla
+    query: 'Sidhu Moose Wala Subh Karan Aujla punjabi gangster songs',
+  },
 ] as const;
 
 const greetingFor = (hour: number) =>
@@ -87,7 +99,7 @@ export default function HomeScreen() {
       if (!query) return;
       setPendingAction(id);
       try {
-        const results = await MusicService.search(query, { filter: 'Songs', limit: 20 });
+        const results = await MusicService.search(query, { filter: 'Songs', limit: 25 });
         if (results.tracks.length) onPlay(results.tracks[0], results.tracks);
       } catch {
         // ignore
@@ -107,7 +119,7 @@ export default function HomeScreen() {
           <View>
             <Text style={styles.greeting}>{greetingFor(new Date().getHours())}</Text>
             {!!profile.name && <Text style={styles.name}>{profile.name}.</Text>}
-            <Text style={styles.madeBy}>mad by Gmax</Text>
+            <Text style={styles.madeBy}>Made by Gmax</Text>
           </View>
           <TouchableOpacity
             style={styles.avatar}
