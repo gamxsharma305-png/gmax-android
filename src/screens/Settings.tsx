@@ -281,7 +281,7 @@ export default function SettingsScreen() {
           <Row label="Made by" value="Gmax" />
         </View>
 
-        <Text style={styles.footer}>mad by Gmax</Text>
+        <Text style={styles.footer}>Made by Gmax</Text>
       </ScrollView>
     </View>
   );
