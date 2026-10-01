@@ -65,7 +65,7 @@ export default function LibraryScreen() {
           const existing = playlists.find((p) => p.name === mix.name);
           if (existing) openPlaylist(existing.id);
           else {
-            const p = createPlaylist(mix.name, { tracks, description: mix.description });
+            const p = createPlaylist(mix.name, tracks);
             openPlaylist(p.id);
           }
         }
@@ -79,6 +79,7 @@ export default function LibraryScreen() {
     [loadingGenre, playTrack, playlists, createPlaylist]
   );
 
+  // My Playlist data (user playlists) — shown FIRST
   const data = [
     { id: 'liked', name: 'Liked Songs', count: likedPlaylist.tracks.length, cover: null },
     ...ordered.map((p) => ({
@@ -89,9 +90,10 @@ export default function LibraryScreen() {
     })),
   ];
 
-  const ListHeader = (
-    <>
-      <Text style={styles.sectionLabel}>AUTO MIXES</Text>
+  // Auto Playlist section — shown BELOW user playlists (footer)
+  const ListFooter = (
+    <View style={{ marginTop: SIZES.lg }}>
+      <Text style={styles.sectionLabel}>AUTO PLAYLIST</Text>
       <Text style={styles.hint}>Tap to play · long-press to save in library</Text>
       {autoError ? <Text style={styles.error}>{autoError}</Text> : null}
       <View style={styles.mixGrid}>
@@ -118,8 +120,11 @@ export default function LibraryScreen() {
           </TouchableOpacity>
         ))}
       </View>
-      <Text style={[styles.sectionLabel, { marginTop: SIZES.md }]}>YOUR PLAYLISTS</Text>
-    </>
+    </View>
+  );
+
+  const ListHeader = (
+    <Text style={styles.sectionLabel}>MY PLAYLIST</Text>
   );
 
   return (
@@ -156,6 +161,7 @@ export default function LibraryScreen() {
         data={data}
         keyExtractor={(item) => item.id}
         ListHeaderComponent={ListHeader}
+        ListFooterComponent={ListFooter}
         contentContainerStyle={{
           paddingHorizontal: SIZES.md,
           paddingBottom: currentTrack ? 100 : insets.bottom + 24,
