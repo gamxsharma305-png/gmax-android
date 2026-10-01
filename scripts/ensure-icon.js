@@ -1,21 +1,19 @@
 /**
  * EAS / local:
  *  - assets/splash.png  → solid #050707 (no white flash before GSplash)
- *  - assets/icon.png    → user photo centered at ~62% on dark canvas
+ *  - assets/icon.png    → user photo centered at ~55% on dark canvas
  *    so Android adaptive icon does not crop/zoom the face.
- *
- * Padding uses a simple nearest-neighbor scale of decoded RGB when possible;
- * otherwise falls back to solid dark + original file as-is.
  */
 const fs = require("fs");
 const path = require("path");
 const https = require("https");
 const http = require("http");
 const zlib = require("zlib");
+const { execSync } = require("child_process");
 
 const ICON_URL = "https://i.postimg.cc/prCsgYtQ/me-(1).png";
 const OUT_SIZE = 1024;
-const CONTENT_RATIO = 0.62; // adaptive-icon safe zone
+const CONTENT_RATIO = 0.55; // tighter safe zone — less zoom on launcher
 
 function crc32(buf) {
   let c = 0xffffffff;
@@ -99,61 +97,66 @@ function download(url, redirects = 0) {
   });
 }
 
-/**
- * Try to pad with sharp if available (EAS images often have it via transitive deps),
- * otherwise keep original download and rely on dark adaptive backgroundColor.
- */
-async function writePaddedIcon(srcBuf, outPath) {
+function ensureSharp() {
   try {
-    // Optional: sharp is not a direct dep; skip if missing
-    // eslint-disable-next-line import/no-extraneous-dependencies
-    const sharp = require("sharp");
-    const content = Math.round(OUT_SIZE * CONTENT_RATIO);
-    const padded = await sharp({
-      create: {
-        width: OUT_SIZE,
-        height: OUT_SIZE,
-        channels: 3,
-        background: { r: 5, g: 7, b: 7 },
-      },
-    })
-      .composite([
-        {
-          input: await sharp(srcBuf)
-            .resize(content, content, { fit: "cover" })
-            .png()
-            .toBuffer(),
-          top: Math.round((OUT_SIZE - content) / 2),
-          left: Math.round((OUT_SIZE - content) / 2),
-        },
-      ])
-      .png()
-      .toBuffer();
-    fs.writeFileSync(outPath, padded);
-    console.log("[ensure-icon] wrote padded icon", outPath, padded.length, "bytes");
+    require.resolve("sharp");
     return true;
   } catch {
+    try {
+      execSync("npm install sharp --no-save --prefer-offline", {
+        stdio: "ignore",
+        timeout: 120000,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+async function writePaddedIcon(srcBuf, outPath) {
+  if (!ensureSharp()) {
     fs.writeFileSync(outPath, srcBuf);
-    console.log(
-      "[ensure-icon] wrote original icon (no sharp for padding)",
-      outPath,
-      srcBuf.length,
-      "bytes"
-    );
+    console.log("[ensure-icon] wrote original icon (no sharp)", outPath, srcBuf.length);
     return false;
   }
+
+  const sharp = require("sharp");
+  const content = Math.round(OUT_SIZE * CONTENT_RATIO);
+  const padded = await sharp({
+    create: {
+      width: OUT_SIZE,
+      height: OUT_SIZE,
+      channels: 3,
+      background: { r: 5, g: 7, b: 7 },
+    },
+  })
+    .composite([
+      {
+        input: await sharp(srcBuf)
+          .resize(content, content, { fit: "cover" })
+          .png()
+          .toBuffer(),
+        top: Math.round((OUT_SIZE - content) / 2),
+        left: Math.round((OUT_SIZE - content) / 2),
+      },
+    ])
+    .png()
+    .toBuffer();
+
+  fs.writeFileSync(outPath, padded);
+  console.log("[ensure-icon] wrote padded icon", outPath, padded.length, "bytes", "ratio", CONTENT_RATIO);
+  return true;
 }
 
 async function main() {
   const dir = path.join(__dirname, "..", "assets");
   fs.mkdirSync(dir, { recursive: true });
 
-  // 1) Dark splash — always (kills white flash)
   const splashPath = path.join(dir, "splash.png");
   fs.writeFileSync(splashPath, makeSolidPng(512));
   console.log("[ensure-icon] wrote dark splash", splashPath);
 
-  // 2) Launcher icon
   const iconPath = path.join(dir, "icon.png");
   try {
     const buf = await download(ICON_URL);
