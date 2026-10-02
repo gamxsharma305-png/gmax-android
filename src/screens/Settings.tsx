@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronLeft } from 'lucide-react-native';
+import { ChevronLeft, Crown } from 'lucide-react-native';
 import Constants from 'expo-constants';
 import { useNavigation } from '@react-navigation/native';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
@@ -21,6 +21,7 @@ import {
   ThemeMode,
 } from '../services/LibraryService';
 import { useLibrary } from '../hooks/useLibrary';
+import { useSubscription } from '../hooks/useSubscription';
 
 const GENDERS: { value: Gender; label: string }[] = [
   { value: 'male', label: 'Male' },
@@ -53,6 +54,7 @@ export default function SettingsScreen() {
   const navigation = useNavigation();
   const { profile, saveProfile, history, playlists, liked, settings, updateSettings } =
     useLibrary();
+  const { isPremium, daysLeft } = useSubscription();
 
   const [name, setName] = useState(profile.name);
 
@@ -79,6 +81,26 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + SIZES.xxl }}>
+        <Text style={styles.sectionLabel}>PREMIUM</Text>
+        <TouchableOpacity
+          style={styles.premiumCard}
+          onPress={() => navigation.navigate('Paywall' as never)}
+          activeOpacity={0.85}
+        >
+          <Crown color={COLORS.accent.green} size={22} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.premiumTitle}>
+              {isPremium ? 'GMAX Premium active' : 'Upgrade to Premium'}
+            </Text>
+            <Text style={styles.premiumMeta}>
+              {isPremium
+                ? `${daysLeft} days left · manage plan`
+                : '₹19/mo or ₹39/2 mo · Download, Auto Playlists'}
+            </Text>
+          </View>
+          <Text style={styles.premiumCta}>{isPremium ? 'View' : 'Pay'}</Text>
+        </TouchableOpacity>
+
         <Text style={styles.sectionLabel}>PROFILE</Text>
         <View style={styles.card}>
           <View style={styles.avatarRow}>
@@ -267,7 +289,9 @@ export default function SettingsScreen() {
           <Divider />
           <Row label="YouTube + Saavn + Audius" value="On" />
           <Divider />
-          <Row label="Auto playlists" value="On" />
+          <Row label="Auto playlists" value={isPremium ? 'Premium' : 'Locked'} />
+          <Divider />
+          <Row label="Offline download" value={isPremium ? 'Premium' : 'Locked'} />
           <Divider />
           <Row label="Lock screen controls" value="On" />
         </View>
@@ -322,6 +346,29 @@ const styles = StyleSheet.create({
     marginTop: SIZES.lg,
     marginBottom: SIZES.sm,
     marginHorizontal: SIZES.md,
+  },
+  premiumCard: {
+    marginHorizontal: SIZES.md,
+    padding: SIZES.md,
+    borderRadius: SIZES.radius.md,
+    backgroundColor: COLORS.surfaceRaised,
+    borderWidth: 1,
+    borderColor: COLORS.accent.green,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  premiumTitle: { fontFamily: FONTS.medium, fontSize: 16, color: COLORS.text.primary },
+  premiumMeta: {
+    fontFamily: FONTS.regular,
+    fontSize: 12,
+    color: COLORS.text.secondary,
+    marginTop: 2,
+  },
+  premiumCta: {
+    fontFamily: FONTS.bold,
+    fontSize: 14,
+    color: COLORS.accent.green,
   },
   card: {
     marginHorizontal: SIZES.md,
