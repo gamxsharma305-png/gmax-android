@@ -5,6 +5,7 @@ import {
   STORAGE_KEYS,
 } from '../core/storage';
 import { Playlist, Track } from '../core/types';
+import { downloadTrackAudio, localFileExists, removeOfflineFile } from './OfflineService';
 
 export type Gender = 'male' | 'female' | 'unspecified';
 
@@ -285,25 +286,63 @@ class LibraryServiceImpl {
     this.updatePlaylist(playlistId, { tracks });
   }
 
-  /** Save track into local Downloads playlist (offline / download section). */
-  saveOffline(track: Track): { playlistId: string; alreadyHad: boolean } {
+  /**
+   * True offline: resolve stream, download audio file to device, save in Downloads playlist with localUri.
+   */
+  async saveOffline(
+    track: Track,
+    signal?: AbortSignal
+  ): Promise<{ playlistId: string; alreadyHad: boolean; localUri: string }> {
+    const { localUri, alreadyHad: fileHad } = await downloadTrackAudio(track, signal);
+    const offlineTrack: Track = { ...stripStream(track), localUri };
+
     let pl = this.playlists.find((p) => p.name === OFFLINE_PLAYLIST_NAME);
     if (!pl) {
       pl = this.createPlaylist(OFFLINE_PLAYLIST_NAME, {
         description: 'Tracks saved for offline',
-        tracks: [track],
+        tracks: [offlineTrack],
         coverImageUrl: track.albumImageUrl,
       });
-      return { playlistId: pl.id, alreadyHad: false };
+      this.notifyChanged();
+      return { playlistId: pl.id, alreadyHad: false, localUri };
     }
-    const had = pl.tracks.some((t) => t.id === track.id);
-    if (!had) this.addToPlaylist(pl.id, track);
-    return { playlistId: pl.id, alreadyHad: had };
+
+    const idx = pl.tracks.findIndex((t) => t.id === track.id);
+    if (idx >= 0) {
+      const updated = [...pl.tracks];
+      updated[idx] = { ...updated[idx], localUri };
+      this.updatePlaylist(pl.id, { tracks: updated });
+    } else {
+      this.addToPlaylist(pl.id, offlineTrack);
+    }
+
+    this.notifyChanged();
+    return { playlistId: pl.id, alreadyHad: fileHad && idx >= 0, localUri };
   }
 
+  /** Sync check — true if track is in Downloads list (may still need file). */
   isOffline(trackId: string): boolean {
     const pl = this.playlists.find((p) => p.name === OFFLINE_PLAYLIST_NAME);
-    return !!pl?.tracks.some((t) => t.id === trackId);
+    return !!pl?.tracks.some((t) => t.id === trackId && !!t.localUri);
+  }
+
+  getOfflineTrack(trackId: string): Track | undefined {
+    const pl = this.playlists.find((p) => p.name === OFFLINE_PLAYLIST_NAME);
+    return pl?.tracks.find((t) => t.id === trackId);
+  }
+
+  async hasOfflineFile(trackId: string): Promise<boolean> {
+    const t = this.getOfflineTrack(trackId);
+    return localFileExists(t?.localUri);
+  }
+
+  async removeOffline(trackId: string): Promise<void> {
+    const pl = this.playlists.find((p) => p.name === OFFLINE_PLAYLIST_NAME);
+    if (!pl) return;
+    const t = pl.tracks.find((x) => x.id === trackId);
+    if (t?.localUri) await removeOfflineFile(t.localUri);
+    this.removeFromPlaylist(pl.id, trackId);
+    this.notifyChanged();
   }
 
   private persistPlaylists(): void {
@@ -421,6 +460,7 @@ class LibraryServiceImpl {
   }
 }
 
+/** Strip temporary streaming URLs but keep localUri for offline. */
 function stripStream(track: Track): Track {
   if (!track.audioUrl) return track;
   const { audioUrl, ...rest } = track;
