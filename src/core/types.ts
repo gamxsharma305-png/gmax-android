@@ -18,6 +18,8 @@ export type Track = {
   duration: number;
   /** Direct playable HTTPS audio — enables real background playback */
   audioUrl?: string;
+  /** Local file:// path after offline download — plays without network */
+  localUri?: string;
   provider: ProviderId;
   sourceId: string;
   album?: string;
