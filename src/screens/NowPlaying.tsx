@@ -22,11 +22,13 @@ import {
   Download,
   Timer,
   Check,
+  Lock,
 } from 'lucide-react-native';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { SeekBar } from '../components/player/SeekBar';
 import { usePlayer } from '../hooks/usePlayer';
 import { useLibrary } from '../hooks/useLibrary';
+import { useSubscription } from '../hooks/useSubscription';
 import { LibraryService } from '../services/LibraryService';
 import { useNavigation } from '@react-navigation/native';
 
@@ -57,6 +59,7 @@ export default function NowPlayingScreen() {
     retry,
   } = usePlayer();
   const { isLiked, toggleLike } = useLibrary();
+  const { canDownload, isPremium } = useSubscription();
 
   const [savedOffline, setSavedOffline] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -125,6 +128,10 @@ export default function NowPlayingScreen() {
 
   const onDownload = async () => {
     if (!currentTrack || downloading) return;
+    if (!canDownload()) {
+      navigation.navigate('Paywall' as never);
+      return;
+    }
     if (savedOffline) {
       setDownloadMsg('Already saved offline');
       setTimeout(() => setDownloadMsg(null), 2000);
@@ -246,11 +253,19 @@ export default function NowPlayingScreen() {
             <ActivityIndicator color={COLORS.text.secondary} size="small" />
           ) : savedOffline ? (
             <Check color={COLORS.accent.green} size={20} />
+          ) : !isPremium ? (
+            <Lock color={COLORS.text.secondary} size={20} />
           ) : (
             <Download color={COLORS.text.secondary} size={20} />
           )}
           <Text style={[styles.extraLabel, savedOffline && { color: COLORS.accent.green }]}>
-            {downloading ? 'Saving…' : savedOffline ? 'Offline' : 'Download'}
+            {downloading
+              ? 'Saving…'
+              : savedOffline
+                ? 'Offline'
+                : !isPremium
+                  ? 'Premium'
+                  : 'Download'}
           </Text>
         </TouchableOpacity>
 
