@@ -11,6 +11,24 @@ export interface StreamSource {
 }
 
 const STREAM_TTL = 4 * 60 * 60 * 1000;
+const LOCAL_TTL = 10 * 365 * 24 * 60 * 60 * 1000; // local files don't expire
+
+/** Offline file first — no network needed. */
+export class LocalStreamSource implements StreamSource {
+  readonly id = 'local';
+
+  canHandle(track: Track): boolean {
+    return typeof track.localUri === 'string' && track.localUri.length > 0;
+  }
+
+  async resolve(track: Track): Promise<ResolvedStream> {
+    return {
+      url: track.localUri as string,
+      expiresAt: Date.now() + LOCAL_TTL,
+      resolvedBy: this.id,
+    };
+  }
+}
 
 export class DirectStreamSource implements StreamSource {
   readonly id = 'direct';
@@ -197,6 +215,15 @@ export class StreamResolverChain {
   }
 
   async resolve(track: Track, signal?: AbortSignal): Promise<ResolvedStream> {
+    // Always prefer local offline file — skip network cache
+    if (track.localUri) {
+      return {
+        url: track.localUri,
+        expiresAt: Date.now() + LOCAL_TTL,
+        resolvedBy: 'local',
+      };
+    }
+
     const cached = this.peek(track);
     if (cached) return cached;
 
@@ -243,12 +270,14 @@ export const endpointSource = new EndpointStreamSource();
 
 /**
  * Order for YouTube background play:
- * 1) Direct audioUrl (Saavn/Audius/iTunes) — expo-audio + background
- * 2) Native NewPipe (real YouTube audio URL + User-Agent) — expo-audio + background
+ * 0) Local offline file
+ * 1) Direct audioUrl (Saavn/Audius/iTunes)
+ * 2) Native NewPipe
  * 3) Title match Saavn/Audius fallback
- * 4) Public Invidious/Piped endpoints (often down)
+ * 4) Public Invidious/Piped endpoints
  */
 export const streamResolver = new StreamResolverChain()
+  .use(new LocalStreamSource())
   .use(new DirectStreamSource())
   .use(new NativeStreamSource())
   .use(new TitleMatchStreamSource())
