@@ -1,22 +1,16 @@
 import { readJson, writeJson, STORAGE_KEYS } from '../core/storage';
 
 /**
- * GMAX Premium — Razorpay payment links / checkout.
+ * GMAX Premium — Razorpay Payment Links.
  *
- * Setup (you do this once in Razorpay Dashboard):
- * 1. Create account at https://razorpay.com
- * 2. Payment Links → New:
- *    - ₹19  → 1 month  (copy short URL)
- *    - ₹39  → 2 months (copy short URL)
- * 3. Paste those URLs into PLANS below (paymentLink).
- * 4. Optional: set razorpayKeyId for in-app checkout branding.
+ * Live links (no custom redirect configured):
+ *  ₹19 / 1 month  → https://rzp.io/rzp/CXGmrGhC
+ *  ₹39 / 2 months → https://rzp.io/rzp/bNWwvel
  *
- * Flow: user taps plan → opens Razorpay page → pays → returns →
- * app activates premium until expiresAt (device-local).
+ * After pay, user taps Done / "I've paid" in the app to unlock
+ * (Razorpay default thank-you page; auto URL detect is best-effort).
  *
- * Production tip: verify payment on YOUR backend with Razorpay
- * signature + webhook. Client-only unlock is fine to start, but
- * can be bypassed by advanced users.
+ * Production tip: verify on a backend with Razorpay signature + webhook.
  */
 
 export type PlanId = 'monthly' | 'bimonthly';
@@ -27,7 +21,7 @@ export type Plan = {
   priceInr: number;
   days: number;
   label: string;
-  /** Razorpay Payment Link from dashboard, e.g. https://rzp.io/i/xxxx */
+  /** Razorpay Payment Link short URL */
   paymentLink: string;
 };
 
@@ -36,14 +30,12 @@ export type SubscriptionState = {
   planId: PlanId | null;
   /** epoch ms when premium ends */
   expiresAt: number;
-  /** last payment reference if known */
   paymentId?: string;
   activatedAt?: number;
 };
 
 const STORAGE_KEY = 'subscription';
 
-/** Replace paymentLink values with your real Razorpay Payment Links. */
 export const PLANS: Plan[] = [
   {
     id: 'monthly',
@@ -51,8 +43,7 @@ export const PLANS: Plan[] = [
     priceInr: 19,
     days: 30,
     label: '₹19 / month',
-    // TODO: paste your ₹19 Payment Link from Razorpay Dashboard
-    paymentLink: 'https://razorpay.com/payment-link',
+    paymentLink: 'https://rzp.io/rzp/CXGmrGhC',
   },
   {
     id: 'bimonthly',
@@ -60,13 +51,12 @@ export const PLANS: Plan[] = [
     priceInr: 39,
     days: 60,
     label: '₹39 / 2 months',
-    // TODO: paste your ₹39 Payment Link from Razorpay Dashboard
-    paymentLink: 'https://razorpay.com/payment-link',
+    paymentLink: 'https://rzp.io/rzp/bNWwvel',
   },
 ];
 
-/** Optional — only Key ID is public; never put Key Secret in the app. */
-export const RAZORPAY_KEY_ID = ''; // e.g. 'rzp_live_xxxxx' or 'rzp_test_xxxxx'
+/** Optional public Key ID only — never put Key Secret in the app. */
+export const RAZORPAY_KEY_ID = '';
 
 export const PREMIUM_FEATURES = [
   'Offline download',
@@ -125,7 +115,6 @@ class SubscriptionServiceImpl {
     return this.state.active && this.state.expiresAt > Date.now();
   }
 
-  /** Free users: max 1 custom playlist (excluding Downloads / system). */
   canCreatePlaylist(currentUserPlaylistCount: number): boolean {
     if (this.isPremium()) return true;
     return currentUserPlaylistCount < 1;
@@ -143,10 +132,6 @@ class SubscriptionServiceImpl {
     return PLANS.find((p) => p.id === id);
   }
 
-  /**
-   * Call after successful Razorpay payment (or test unlock).
-   * Extends from now (or stacks if already active).
-   */
   async activate(planId: PlanId, paymentId?: string): Promise<SubscriptionState> {
     const plan = this.getPlan(planId);
     if (!plan) throw new Error('Unknown plan');
@@ -181,5 +166,4 @@ class SubscriptionServiceImpl {
 
 export const SubscriptionService = new SubscriptionServiceImpl();
 
-// Ensure storage key is documented alongside others
 void STORAGE_KEYS;
