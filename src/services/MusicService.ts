@@ -2,6 +2,7 @@ import { metadataCache } from '../core/cache';
 import { appError, toAppError } from '../core/errors';
 import {
   emptySearchResults,
+  ResolvedStream,
   SearchFilter,
   SearchResults,
   Track,
@@ -9,9 +10,13 @@ import {
 import { PlaylistPage, providers } from '../providers/TrackResolver';
 import { youtubeResolver } from '../providers/youtube/YouTubeResolver';
 import { streamResolver } from '../providers/stream/StreamResolver';
+import { TitleMatchStreamSource } from '../providers/stream/TitleMatchStreamSource';
 import { multiSourceSearch } from '../providers/MultiSourceSearch';
 
 providers.register(youtubeResolver, true);
+
+const titleMatchSource = new TitleMatchStreamSource();
+const OFFLINE_TTL = 4 * 60 * 60 * 1000;
 
 class MusicServiceImpl {
   async init(): Promise<void> {
@@ -27,7 +32,6 @@ class MusicServiceImpl {
 
     const limit = options.limit ?? 24;
 
-    // YouTube Music results (may lack audioUrl)
     let youtubeTracks: Track[] = [];
     try {
       const yt = await providers.default.search(q, { ...options, limit: Math.ceil(limit / 2) });
@@ -36,7 +40,6 @@ class MusicServiceImpl {
       youtubeTracks = [];
     }
 
-    // Saavn + Audius + iTunes (with audioUrl → background OK)
     try {
       return await multiSourceSearch(q, {
         limit,
@@ -136,8 +139,40 @@ class MusicServiceImpl {
     return { track: await provider.getMetadata(parsed.id, signal) };
   }
 
-  /** All providers go through streamResolver (local / direct / NewPipe / endpoints). */
   async resolveStream(track: Track, signal?: AbortSignal) {
+    return streamResolver.resolve(track, signal);
+  }
+
+  /**
+   * Offline download stream: prefer complete CDN files (direct / Saavn / Audius)
+   * over YouTube progressive URLs that often truncate mid-file.
+   */
+  async resolveStreamForOffline(track: Track, signal?: AbortSignal): Promise<ResolvedStream> {
+    if (track.localUri) {
+      return {
+        url: track.localUri,
+        expiresAt: Date.now() + OFFLINE_TTL,
+        resolvedBy: 'local',
+      };
+    }
+
+    if (typeof track.audioUrl === 'string' && /^https?:\/\//.test(track.audioUrl)) {
+      return {
+        url: track.audioUrl,
+        expiresAt: Date.now() + OFFLINE_TTL,
+        resolvedBy: 'direct',
+      };
+    }
+
+    // Saavn / Audius title match — full progressive files, usually finishes in a few seconds
+    try {
+      const matched = await titleMatchSource.resolve(track, signal);
+      if (matched?.url) return matched;
+    } catch {
+      /* fall through */
+    }
+
+    // Last resort: normal chain (may be YouTube — slower / can truncate)
     return streamResolver.resolve(track, signal);
   }
 
