@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Linking,
   Modal,
-  Pressable,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -18,8 +17,9 @@ import { useSubscription } from '../hooks/useSubscription';
 import { Plan, PlanId } from '../services/SubscriptionService';
 
 /**
- * Detect common Razorpay success URL patterns so we can auto-unlock.
- * Also allow manual "I've paid" after returning from browser.
+ * Best-effort success URL detect. Without a custom redirect on the
+ * Payment Link, Razorpay often stays on its own thank-you page — user
+ * taps "Payment done — Unlock" in the WebView bar.
  */
 function looksLikePaymentSuccess(url: string): boolean {
   const u = url.toLowerCase();
@@ -29,7 +29,10 @@ function looksLikePaymentSuccess(url: string): boolean {
     u.includes('/success') ||
     u.includes('status=captured') ||
     u.includes('status=authorized') ||
-    u.includes('payment-success')
+    u.includes('payment-success') ||
+    u.includes('payments.razorpay.com') && u.includes('success') ||
+    u.includes('thank') ||
+    u.includes('paid=true')
   );
 }
 
@@ -57,37 +60,25 @@ export default function PaywallScreen() {
     [activate, navigation]
   );
 
-  const openPayment = useCallback(
-    async (plan: Plan) => {
-      pendingPlan.current = plan.id;
-      setMsg(null);
-
-      const link = (plan.paymentLink || '').trim();
-      const isPlaceholder =
-        !link ||
-        link.includes('razorpay.com/payment-link') ||
-        link === 'https://razorpay.com/payment-link';
-
-      if (isPlaceholder) {
-        // Dev / until you paste real Payment Links — simulate successful pay
-        setPaying(true);
-        setMsg('Test mode: activating premium…');
-        await unlock(plan.id, `test_${Date.now()}`);
-        return;
-      }
-
-      // Prefer in-app WebView so success URL can be detected
-      setWebUrl(link);
-      setPaying(true);
-    },
-    [unlock]
-  );
+  const openPayment = useCallback(async (plan: Plan) => {
+    pendingPlan.current = plan.id;
+    setMsg(null);
+    const link = (plan.paymentLink || '').trim();
+    if (!link) {
+      setMsg('Payment link missing');
+      return;
+    }
+    // In-app WebView — Razorpay page stays inside GMAX
+    setWebUrl(link);
+    setPaying(true);
+  }, []);
 
   const openInBrowser = useCallback(async () => {
     if (!selectedPlan?.paymentLink) return;
+    pendingPlan.current = selectedPlan.id;
     try {
       await Linking.openURL(selectedPlan.paymentLink);
-      setMsg('Pay on Razorpay, then tap "I\'ve paid" below.');
+      setMsg('Pay on Razorpay, then tap "I\'ve paid — unlock now".');
     } catch {
       setMsg('Could not open payment page.');
     }
@@ -160,7 +151,7 @@ export default function PaywallScreen() {
             <TouchableOpacity
               style={styles.payBtn}
               onPress={() => selectedPlan && void openPayment(selectedPlan)}
-              disabled={paying}
+              disabled={paying && !!webUrl}
               activeOpacity={0.85}
             >
               {paying && !webUrl ? (
@@ -176,8 +167,8 @@ export default function PaywallScreen() {
               <Text style={styles.linkText}>Open payment page in browser</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={() => void onManualPaid()} style={styles.linkBtn}>
-              <Text style={styles.linkText}>I've paid — unlock now</Text>
+            <TouchableOpacity onPress={() => void onManualPaid()} style={styles.unlockBtn}>
+              <Text style={styles.unlockBtnText}>I've paid — unlock now</Text>
             </TouchableOpacity>
           </>
         )}
@@ -185,7 +176,9 @@ export default function PaywallScreen() {
         {msg ? <Text style={styles.msg}>{msg}</Text> : null}
 
         <Text style={styles.footnote}>
-          Payment via Razorpay. After success, Premium unlocks on this device for the plan period.
+          Pay on Razorpay (UPI / card). After payment success, tap "I've paid — unlock now"
+          or the green Unlock button on the payment screen. Premium stays on this device for
+          the plan period.
         </Text>
       </View>
 
@@ -201,10 +194,9 @@ export default function PaywallScreen() {
               <Text style={styles.webClose}>Close</Text>
             </TouchableOpacity>
             <Text style={styles.webTitle}>Razorpay</Text>
-            <TouchableOpacity onPress={() => void onManualPaid()}>
-              <Text style={styles.webDone}>Done</Text>
-            </TouchableOpacity>
+            <View style={{ width: 48 }} />
           </View>
+
           {webUrl ? (
             <WebView
               source={{ uri: webUrl }}
@@ -217,6 +209,16 @@ export default function PaywallScreen() {
               style={{ flex: 1, backgroundColor: '#fff' }}
             />
           ) : null}
+
+          {/* Always visible — no redirect needed on Payment Link */}
+          <View style={[styles.webFooter, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+            <Text style={styles.webFooterHint}>
+              Payment complete ho gayi? Neeche Unlock dabao.
+            </Text>
+            <TouchableOpacity style={styles.webUnlockBtn} onPress={() => void onManualPaid()}>
+              <Text style={styles.webUnlockText}>Payment done — Unlock Premium</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </Modal>
     </View>
@@ -285,8 +287,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   payBtnText: { fontFamily: FONTS.bold, fontSize: 16, color: COLORS.background },
-  linkBtn: { alignItems: 'center', paddingVertical: 12 },
+  linkBtn: { alignItems: 'center', paddingVertical: 10 },
   linkText: { fontFamily: FONTS.medium, fontSize: 13, color: COLORS.text.secondary },
+  unlockBtn: {
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: COLORS.accent.green,
+    borderRadius: SIZES.radius.md,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  unlockBtnText: { fontFamily: FONTS.bold, fontSize: 14, color: COLORS.accent.green },
   msg: {
     textAlign: 'center',
     fontFamily: FONTS.medium,
@@ -314,5 +325,25 @@ const styles = StyleSheet.create({
   },
   webClose: { fontFamily: FONTS.medium, fontSize: 15, color: COLORS.text.secondary },
   webTitle: { fontFamily: FONTS.bold, fontSize: 15, color: COLORS.text.primary },
-  webDone: { fontFamily: FONTS.medium, fontSize: 15, color: COLORS.accent.green },
+  webFooter: {
+    paddingHorizontal: SIZES.md,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.glassBorder,
+    backgroundColor: COLORS.surfaceRaised,
+  },
+  webFooterHint: {
+    fontFamily: FONTS.regular,
+    fontSize: 12,
+    color: COLORS.text.secondary,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  webUnlockBtn: {
+    backgroundColor: COLORS.accent.green,
+    borderRadius: SIZES.radius.md,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  webUnlockText: { fontFamily: FONTS.bold, fontSize: 15, color: COLORS.background },
 });
