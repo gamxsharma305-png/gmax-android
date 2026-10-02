@@ -188,18 +188,38 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     [bumpQueue, persistQueue]
   );
 
+  /** When queue ends, restart from first track (Downloads / playlist loop). */
+  const restartQueueFromStart = useCallback(() => {
+    const items = queueRef.current.items;
+    if (!items.length) return false;
+    const first = items[0];
+    if (!first) return false;
+    queueRef.current.jumpTo(first.id);
+    bumpQueue();
+    persistQueue();
+    void loadCurrent({ autoPlay: true });
+    return true;
+  }, [bumpQueue, loadCurrent, persistQueue]);
+
   const extendWithRelated = useCallback(async () => {
     const settings = LibraryService.getSettings();
     const last = queueRef.current.current;
 
-    if (!settings.autoplayRelated || !last) return;
+    if (!settings.autoplayRelated || !last) {
+      // No related — loop current playlist instead of stopping
+      restartQueueFromStart();
+      return;
+    }
 
     try {
       const related = await MusicService.getRelated(last);
       const fresh = related.filter(
         (t) => !queueRef.current.items.some((q) => q.id === t.id)
       );
-      if (!fresh.length) return;
+      if (!fresh.length) {
+        restartQueueFromStart();
+        return;
+      }
 
       queueRef.current.add(fresh.slice(0, 20));
       const nextTrack = queueRef.current.next(false);
@@ -207,10 +227,11 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       persistQueue();
 
       if (nextTrack) void loadCurrent({ autoPlay: true });
+      else restartQueueFromStart();
     } catch {
-      // silence
+      restartQueueFromStart();
     }
-  }, [bumpQueue, loadCurrent, persistQueue]);
+  }, [bumpQueue, loadCurrent, persistQueue, restartQueueFromStart]);
 
   useEffect(() => {
     playbackEngine.on('onStatus', (s) => setStatus(s));
@@ -221,6 +242,17 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       persistQueue();
 
       if (!nextTrack) {
+        // End of queue → restart from first song (auto-play loop)
+        if (queueRef.current.length > 0) {
+          const first = queueRef.current.items[0];
+          if (first) {
+            queueRef.current.jumpTo(first.id);
+            bumpQueue();
+            persistQueue();
+            void loadCurrent({ autoPlay: true });
+            return;
+          }
+        }
         void extendWithRelated();
         return;
       }
@@ -336,6 +368,10 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       );
 
       queueRef.current.setTracks(list, startIndex, context?.label ?? '');
+      // Auto-loop playlists (Downloads, My Playlist, etc.) so end → start
+      if (list.length > 1) {
+        queueRef.current.setRepeat('all');
+      }
       bumpQueue();
       persistQueue();
 
@@ -370,11 +406,11 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     persistQueue();
 
     if (!nextTrack) {
-      void extendWithRelated();
+      if (!restartQueueFromStart()) void extendWithRelated();
       return;
     }
     void loadCurrent({ autoPlay: true });
-  }, [bumpQueue, extendWithRelated, loadCurrent, persistQueue]);
+  }, [bumpQueue, extendWithRelated, loadCurrent, persistQueue, restartQueueFromStart]);
 
   const previous = useCallback(() => {
     if (statusRef.current.position > 3) {
