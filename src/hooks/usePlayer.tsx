@@ -94,12 +94,20 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   const loadCurrent = useCallback(
     async (options: { autoPlay?: boolean; startPosition?: number } = {}) => {
-      const track = queueRef.current.current;
+      let track = queueRef.current.current;
       if (!track) {
         setCurrentTrack(null);
         setIsLoading(false);
         playbackEngine.stop();
         return;
+      }
+
+      // Merge offline localUri from Downloads if available
+      if (!track.localUri) {
+        const offline = LibraryService.getOfflineTrack(track.id);
+        if (offline?.localUri) {
+          track = { ...track, localUri: offline.localUri };
+        }
       }
 
       const id = ++loadId.current;
@@ -117,7 +125,14 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       preloader.adopt(track.id);
 
       if (__DEV__) {
-        console.log('[playback] load', track.title, '| preloaded:', preloadedThis);
+        console.log(
+          '[playback] load',
+          track.title,
+          '| offline:',
+          !!track.localUri,
+          '| preloaded:',
+          preloadedThis
+        );
       }
 
       setCurrentTrack(track);
