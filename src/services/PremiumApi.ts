@@ -1,10 +1,8 @@
 /**
  * Secure Premium API (Vercel).
- * Set PREMIUM_API_BASE to your deployed URL, e.g.
- *   https://gmax-premium-api.vercel.app
- * Leave empty until deployed — claim will fail with a clear error.
+ * Deployed: https://gmax-premium-api.vercel.app
  */
-export const PREMIUM_API_BASE = ''; // e.g. 'https://gmax-premium-api-xxx.vercel.app'
+export const PREMIUM_API_BASE = 'https://gmax-premium-api.vercel.app';
 
 export type ClaimResult = {
   ok: boolean;
