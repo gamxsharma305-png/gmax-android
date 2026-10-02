@@ -5,6 +5,7 @@ import {
   Modal,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -15,62 +16,28 @@ import { useNavigation } from '@react-navigation/native';
 import { COLORS, FONTS, SIZES } from '../constants/theme';
 import { useSubscription } from '../hooks/useSubscription';
 import { Plan, PlanId } from '../services/SubscriptionService';
-
-/**
- * Best-effort success URL detect. Without a custom redirect on the
- * Payment Link, Razorpay often stays on its own thank-you page — user
- * taps "Payment done — Unlock" in the WebView bar.
- */
-function looksLikePaymentSuccess(url: string): boolean {
-  const u = url.toLowerCase();
-  return (
-    u.includes('payment_id=') ||
-    u.includes('razorpay_payment_id') ||
-    u.includes('/success') ||
-    u.includes('status=captured') ||
-    u.includes('status=authorized') ||
-    u.includes('payment-success') ||
-    u.includes('payments.razorpay.com') && u.includes('success') ||
-    u.includes('thank') ||
-    u.includes('paid=true')
-  );
-}
+import { PREMIUM_API_BASE } from '../services/PremiumApi';
 
 export default function PaywallScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { isPremium, plans, features, daysLeft, activate, state } = useSubscription();
+  const { isPremium, plans, features, daysLeft, state, claimWithPaymentId } = useSubscription();
 
   const [selected, setSelected] = useState<PlanId>('monthly');
-  const [paying, setPaying] = useState(false);
   const [webUrl, setWebUrl] = useState<string | null>(null);
+  const [paymentIdInput, setPaymentIdInput] = useState('');
+  const [claiming, setClaiming] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   const pendingPlan = useRef<PlanId | null>(null);
 
   const selectedPlan = plans.find((p) => p.id === selected) ?? plans[0];
 
-  const unlock = useCallback(
-    async (planId: PlanId, paymentId?: string) => {
-      await activate(planId, paymentId);
-      setWebUrl(null);
-      setPaying(false);
-      setMsg('Premium unlocked!');
-      setTimeout(() => navigation.goBack(), 900);
-    },
-    [activate, navigation]
-  );
-
-  const openPayment = useCallback(async (plan: Plan) => {
+  const openPayment = useCallback((plan: Plan) => {
     pendingPlan.current = plan.id;
     setMsg(null);
-    const link = (plan.paymentLink || '').trim();
-    if (!link) {
-      setMsg('Payment link missing');
-      return;
-    }
-    // In-app WebView — Razorpay page stays inside GMAX
-    setWebUrl(link);
-    setPaying(true);
+    setErr(null);
+    setWebUrl(plan.paymentLink);
   }, []);
 
   const openInBrowser = useCallback(async () => {
@@ -78,18 +45,31 @@ export default function PaywallScreen() {
     pendingPlan.current = selectedPlan.id;
     try {
       await Linking.openURL(selectedPlan.paymentLink);
-      setMsg('Pay on Razorpay, then tap "I\'ve paid — unlock now".');
     } catch {
-      setMsg('Could not open payment page.');
+      setErr('Could not open payment page');
     }
   }, [selectedPlan]);
 
-  const onManualPaid = useCallback(async () => {
-    const planId = pendingPlan.current ?? selected;
-    setPaying(true);
-    setMsg('Unlocking…');
-    await unlock(planId);
-  }, [selected, unlock]);
+  const onClaim = useCallback(async () => {
+    const id = paymentIdInput.trim();
+    if (!id) {
+      setErr('Razorpay Payment ID (pay_…) daalo');
+      return;
+    }
+    setClaiming(true);
+    setErr(null);
+    setMsg('Verifying with Razorpay…');
+    const result = await claimWithPaymentId(id);
+    setClaiming(false);
+    if (!result.ok) {
+      setMsg(null);
+      setErr(result.error || 'Verify failed');
+      return;
+    }
+    setMsg('Premium unlocked!');
+    setWebUrl(null);
+    setTimeout(() => navigation.goBack(), 900);
+  }, [paymentIdInput, claimWithPaymentId, navigation]);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + SIZES.sm }]}>
@@ -109,8 +89,8 @@ export default function PaywallScreen() {
           </Text>
           <Text style={styles.heroSub}>
             {isPremium
-              ? `${daysLeft} day${daysLeft === 1 ? '' : 's'} left · plan ${state.planId ?? ''}`
-              : 'Download, Auto Playlists & more playlists'}
+              ? `${daysLeft} day${daysLeft === 1 ? '' : 's'} left · ${state.planId ?? ''}`
+              : 'Pay → enter Payment ID → server verifies → unlock'}
           </Text>
         </View>
 
@@ -129,7 +109,7 @@ export default function PaywallScreen() {
 
         {!isPremium && (
           <>
-            <Text style={styles.sectionLabel}>CHOOSE PLAN</Text>
+            <Text style={styles.sectionLabel}>1. CHOOSE PLAN & PAY</Text>
             {plans.map((p) => {
               const active = selected === p.id;
               return (
@@ -141,7 +121,7 @@ export default function PaywallScreen() {
                 >
                   <View style={{ flex: 1 }}>
                     <Text style={styles.planTitle}>{p.title}</Text>
-                    <Text style={styles.planMeta}>{p.days} days access</Text>
+                    <Text style={styles.planMeta}>{p.days} days</Text>
                   </View>
                   <Text style={styles.planPrice}>₹{p.priceInr}</Text>
                 </TouchableOpacity>
@@ -150,73 +130,87 @@ export default function PaywallScreen() {
 
             <TouchableOpacity
               style={styles.payBtn}
-              onPress={() => selectedPlan && void openPayment(selectedPlan)}
-              disabled={paying && !!webUrl}
+              onPress={() => selectedPlan && openPayment(selectedPlan)}
               activeOpacity={0.85}
             >
-              {paying && !webUrl ? (
-                <ActivityIndicator color={COLORS.background} />
-              ) : (
-                <Text style={styles.payBtnText}>
-                  Pay ₹{selectedPlan?.priceInr} with Razorpay
-                </Text>
-              )}
+              <Text style={styles.payBtnText}>Pay ₹{selectedPlan?.priceInr} with Razorpay</Text>
             </TouchableOpacity>
 
             <TouchableOpacity onPress={() => void openInBrowser()} style={styles.linkBtn}>
-              <Text style={styles.linkText}>Open payment page in browser</Text>
+              <Text style={styles.linkText}>Open in browser</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={() => void onManualPaid()} style={styles.unlockBtn}>
-              <Text style={styles.unlockBtnText}>I've paid — unlock now</Text>
+            <Text style={[styles.sectionLabel, { marginTop: SIZES.lg }]}>2. CLAIM (SECURE)</Text>
+            <Text style={styles.claimHint}>
+              Payment ke baad Razorpay Payment ID (pay_…) daalo. Server Razorpay se check karega —
+              tabhi Premium on hoga. Fake ID se unlock nahi hoga.
+            </Text>
+            <TextInput
+              style={styles.input}
+              value={paymentIdInput}
+              onChangeText={setPaymentIdInput}
+              placeholder="pay_xxxxxxxxxxxx"
+              placeholderTextColor={COLORS.text.muted}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <TouchableOpacity
+              style={styles.unlockBtn}
+              onPress={() => void onClaim()}
+              disabled={claiming}
+            >
+              {claiming ? (
+                <ActivityIndicator color={COLORS.accent.green} />
+              ) : (
+                <Text style={styles.unlockBtnText}>Verify & Unlock</Text>
+              )}
             </TouchableOpacity>
+
+            {!PREMIUM_API_BASE ? (
+              <Text style={styles.warn}>
+                PREMIUM_API_BASE empty — pehle Vercel pe gmax-premium-api deploy karke URL set karo.
+              </Text>
+            ) : null}
           </>
         )}
 
         {msg ? <Text style={styles.msg}>{msg}</Text> : null}
+        {err ? <Text style={styles.err}>{err}</Text> : null}
 
         <Text style={styles.footnote}>
-          Pay on Razorpay (UPI / card). After payment success, tap "I've paid — unlock now"
-          or the green Unlock button on the payment screen. Premium stays on this device for
-          the plan period.
+          Unlock only after Razorpay confirms payment on our server. Key Secret never leaves the
+          server.
         </Text>
       </View>
 
       <Modal visible={!!webUrl} animationType="slide" onRequestClose={() => setWebUrl(null)}>
         <View style={[styles.webWrap, { paddingTop: insets.top }]}>
           <View style={styles.webBar}>
-            <TouchableOpacity
-              onPress={() => {
-                setWebUrl(null);
-                setPaying(false);
-              }}
-            >
+            <TouchableOpacity onPress={() => setWebUrl(null)}>
               <Text style={styles.webClose}>Close</Text>
             </TouchableOpacity>
             <Text style={styles.webTitle}>Razorpay</Text>
             <View style={{ width: 48 }} />
           </View>
-
           {webUrl ? (
             <WebView
               source={{ uri: webUrl }}
               onNavigationStateChange={(nav) => {
-                if (looksLikePaymentSuccess(nav.url) && pendingPlan.current) {
-                  void unlock(pendingPlan.current);
-                }
+                const u = nav.url || '';
+                const m = u.match(/[?&](?:razorpay_)?payment_id=([^&]+)/i);
+                if (m?.[1]) setPaymentIdInput(decodeURIComponent(m[1]));
               }}
               startInLoadingState
               style={{ flex: 1, backgroundColor: '#fff' }}
             />
           ) : null}
-
-          {/* Always visible — no redirect needed on Payment Link */}
           <View style={[styles.webFooter, { paddingBottom: Math.max(insets.bottom, 12) }]}>
             <Text style={styles.webFooterHint}>
-              Payment complete ho gayi? Neeche Unlock dabao.
+              Pay complete ke baad Payment ID neeche claim box me aana chahiye. Phir Close karke
+              Verify & Unlock dabao.
             </Text>
-            <TouchableOpacity style={styles.webUnlockBtn} onPress={() => void onManualPaid()}>
-              <Text style={styles.webUnlockText}>Payment done — Unlock Premium</Text>
+            <TouchableOpacity style={styles.webUnlockBtn} onPress={() => setWebUrl(null)}>
+              <Text style={styles.webUnlockText}>Close & enter Payment ID</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -289,8 +283,26 @@ const styles = StyleSheet.create({
   payBtnText: { fontFamily: FONTS.bold, fontSize: 16, color: COLORS.background },
   linkBtn: { alignItems: 'center', paddingVertical: 10 },
   linkText: { fontFamily: FONTS.medium, fontSize: 13, color: COLORS.text.secondary },
+  claimHint: {
+    fontFamily: FONTS.regular,
+    fontSize: 12,
+    color: COLORS.text.secondary,
+    marginBottom: 8,
+    lineHeight: 18,
+  },
+  input: {
+    backgroundColor: COLORS.surfaceRaised,
+    borderRadius: SIZES.radius.sm,
+    borderWidth: 1,
+    borderColor: COLORS.glassBorder,
+    paddingHorizontal: SIZES.md,
+    paddingVertical: 12,
+    color: COLORS.text.primary,
+    fontFamily: FONTS.regular,
+    fontSize: 14,
+    marginBottom: 10,
+  },
   unlockBtn: {
-    marginTop: 4,
     borderWidth: 1,
     borderColor: COLORS.accent.green,
     borderRadius: SIZES.radius.md,
@@ -298,11 +310,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   unlockBtnText: { fontFamily: FONTS.bold, fontSize: 14, color: COLORS.accent.green },
+  warn: {
+    marginTop: 10,
+    fontFamily: FONTS.regular,
+    fontSize: 12,
+    color: '#e07a5f',
+    textAlign: 'center',
+  },
   msg: {
     textAlign: 'center',
     fontFamily: FONTS.medium,
     fontSize: 13,
     color: COLORS.accent.green,
+    marginTop: 8,
+  },
+  err: {
+    textAlign: 'center',
+    fontFamily: FONTS.medium,
+    fontSize: 13,
+    color: '#e07a5f',
     marginTop: 8,
   },
   footnote: {
