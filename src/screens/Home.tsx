@@ -22,24 +22,49 @@ import { MiniPlayer } from '../components/player/MiniPlayer';
 import { StatusBarScrim } from '../components/common/StatusBarScrim';
 import { useNavigation } from '@react-navigation/native';
 
+/** Hindi lo-fi / soft — rotate so each Chill tap feels fresh */
+const CHILL_QUERIES = [
+  'Arijit Singh lofi hindi songs soft romantic',
+  'hindi lofi mix Arijit Singh chill',
+  'Arijit Singh soft songs acoustic',
+  'hindi chill lofi romantic night',
+  'Arijit Singh unplugged hindi',
+  'bollywood lofi Arijit slow',
+  'hindi romantic slow songs Arijit',
+  'lofi hindi beats soft night',
+];
+
+/** Punjabi gangster — Sidhu, Subh, Karan Aujla, etc. */
+const FOCUS_QUERIES = [
+  'Sidhu Moose Wala Subh Karan Aujla punjabi gangster songs',
+  'Sidhu Moose Wala punjabi songs',
+  'Karan Aujla punjabi hits',
+  'Subh punjabi songs',
+  'punjabi gangster mix Sidhu',
+  'Karan Aujla Subh hardcore punjabi',
+  'Sidhu Moose Wala latest punjabi',
+  'punjabi rap Sidhu Karan Aujla',
+];
+
+function pickRandom<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function shuffleTracks(tracks: Track[]): Track[] {
+  const a = [...tracks];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 /** Website-parity quick actions: Liked | Playlist | Chill | Focus */
 const ACTIONS = [
-  { id: 'liked', label: 'Liked', Icon: Heart, query: null as string | null },
-  { id: 'playlist', label: 'Playlist', Icon: ListMusic, query: 'best playlists songs mix' },
-  {
-    id: 'chill',
-    label: 'Chill',
-    Icon: Moon,
-    // Hindi lo-fi / soft romantic — Arijit & similar
-    query: 'Arijit Singh lofi hindi songs soft romantic',
-  },
-  {
-    id: 'focus',
-    label: 'Focus',
-    Icon: Target,
-    // Punjabi gangster / hardcore — Sidhu, Subh, Karan Aujla
-    query: 'Sidhu Moose Wala Subh Karan Aujla punjabi gangster songs',
-  },
+  { id: 'liked', label: 'Liked', Icon: Heart },
+  { id: 'playlist', label: 'Playlist', Icon: ListMusic },
+  { id: 'chill', label: 'Chill', Icon: Moon },
+  { id: 'focus', label: 'Focus', Icon: Target },
 ] as const;
 
 const greetingFor = (hour: number) =>
@@ -87,20 +112,31 @@ export default function HomeScreen() {
   );
 
   const runAction = useCallback(
-    async (id: string, query: string | null) => {
+    async (id: string) => {
       if (id === 'liked') {
-        if (liked.length) onPlay(liked[0], liked);
+        if (liked.length) {
+          const shuffled = shuffleTracks(liked);
+          onPlay(shuffled[0], shuffled);
+        }
         return;
       }
       if (id === 'playlist') {
         navigation.navigate('LibraryTab' as never);
         return;
       }
+
+      let query: string | null = null;
+      if (id === 'chill') query = pickRandom(CHILL_QUERIES);
+      else if (id === 'focus') query = pickRandom(FOCUS_QUERIES);
       if (!query) return;
+
       setPendingAction(id);
       try {
-        const results = await MusicService.search(query, { filter: 'Songs', limit: 25 });
-        if (results.tracks.length) onPlay(results.tracks[0], results.tracks);
+        const results = await MusicService.search(query, { filter: 'Songs', limit: 30 });
+        if (results.tracks.length) {
+          const mixed = shuffleTracks(results.tracks);
+          onPlay(mixed[0], mixed);
+        }
       } catch {
         // ignore
       } finally {
@@ -160,11 +196,11 @@ export default function HomeScreen() {
         )}
 
         <View style={styles.actionsRow}>
-          {ACTIONS.map(({ id, label, Icon, query }) => (
+          {ACTIONS.map(({ id, label, Icon }) => (
             <TouchableOpacity
               key={id}
               style={styles.actionTouchable}
-              onPress={() => runAction(id, query)}
+              onPress={() => runAction(id)}
               disabled={pendingAction === id}
             >
               <GlassCard intensity={20} style={styles.actionCard}>
