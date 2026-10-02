@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  PlanId,
   PLANS,
   PREMIUM_FEATURES,
   SubscriptionService,
@@ -24,10 +23,15 @@ export function useSubscription() {
     });
   }, []);
 
-  const activate = useCallback(async (planId: PlanId, paymentId?: string) => {
-    const next = await SubscriptionService.activate(planId, paymentId);
-    setState(next);
-    return next;
+  const claimWithPaymentId = useCallback(async (paymentId: string) => {
+    const result = await SubscriptionService.claimWithPaymentId(paymentId);
+    setState(SubscriptionService.getState());
+    return result;
+  }, []);
+
+  const refresh = useCallback(async () => {
+    await SubscriptionService.refreshFromServer();
+    setState(SubscriptionService.getState());
   }, []);
 
   const clear = useCallback(async () => {
@@ -42,10 +46,12 @@ export function useSubscription() {
     plans: PLANS,
     features: PREMIUM_FEATURES,
     daysLeft: SubscriptionService.daysLeft(),
+    deviceId: SubscriptionService.getDeviceId(),
     canDownload: () => SubscriptionService.canDownload(),
     canUseAutoPlaylist: () => SubscriptionService.canUseAutoPlaylist(),
     canCreatePlaylist: (count: number) => SubscriptionService.canCreatePlaylist(count),
-    activate,
+    claimWithPaymentId,
+    refresh,
     clear,
   };
 }
