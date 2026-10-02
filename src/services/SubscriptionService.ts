@@ -1,16 +1,15 @@
 import { readJson, writeJson, STORAGE_KEYS } from '../core/storage';
+import { claimPremium, fetchPremiumStatus } from './PremiumApi';
 
 /**
- * GMAX Premium — Razorpay Payment Links.
+ * GMAX Premium — secure path:
+ * 1) User pays on Razorpay Payment Link
+ * 2) App sends pay_… + deviceId to Vercel /api/claim
+ * 3) Server verifies with Razorpay Key Secret → only then unlock
  *
- * Live links (no custom redirect configured):
- *  ₹19 / 1 month  → https://rzp.io/rzp/CXGmrGhC
- *  ₹39 / 2 months → https://rzp.io/rzp/bNWwvel
- *
- * After pay, user taps Done / "I've paid" in the app to unlock
- * (Razorpay default thank-you page; auto URL detect is best-effort).
- *
- * Production tip: verify on a backend with Razorpay signature + webhook.
+ * Links:
+ *  ₹19 → https://rzp.io/rzp/CXGmrGhC
+ *  ₹39 → https://rzp.io/rzp/bNWwvel
  */
 
 export type PlanId = 'monthly' | 'bimonthly';
@@ -21,20 +20,20 @@ export type Plan = {
   priceInr: number;
   days: number;
   label: string;
-  /** Razorpay Payment Link short URL */
   paymentLink: string;
 };
 
 export type SubscriptionState = {
   active: boolean;
   planId: PlanId | null;
-  /** epoch ms when premium ends */
   expiresAt: number;
   paymentId?: string;
   activatedAt?: number;
+  deviceId?: string;
 };
 
 const STORAGE_KEY = 'subscription';
+const DEVICE_KEY = 'device-id';
 
 export const PLANS: Plan[] = [
   {
@@ -55,9 +54,6 @@ export const PLANS: Plan[] = [
   },
 ];
 
-/** Optional public Key ID only — never put Key Secret in the app. */
-export const RAZORPAY_KEY_ID = '';
-
 export const PREMIUM_FEATURES = [
   'Offline download',
   'All Auto Playlists',
@@ -71,28 +67,44 @@ const DEFAULT_STATE: SubscriptionState = {
   expiresAt: 0,
 };
 
+function randomId(): string {
+  return `gmax_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+}
+
 class SubscriptionServiceImpl {
   private state: SubscriptionState = { ...DEFAULT_STATE };
+  private deviceId = '';
   private listeners = new Set<() => void>();
   private loaded = false;
 
   async load(): Promise<void> {
     if (this.loaded) return;
+    this.deviceId = await readJson<string>(DEVICE_KEY, '');
+    if (!this.deviceId) {
+      this.deviceId = randomId();
+      await writeJson(DEVICE_KEY, this.deviceId);
+    }
     const stored = await readJson<Partial<SubscriptionState>>(STORAGE_KEY, {});
-    this.state = { ...DEFAULT_STATE, ...stored };
+    this.state = { ...DEFAULT_STATE, ...stored, deviceId: this.deviceId };
     this.recompute();
     this.loaded = true;
+    // Soft refresh from server when API is configured
+    void this.refreshFromServer();
+  }
+
+  getDeviceId(): string {
+    return this.deviceId;
   }
 
   private recompute(): void {
     const now = Date.now();
     if (this.state.expiresAt > 0 && this.state.expiresAt <= now) {
-      this.state = { ...DEFAULT_STATE };
+      this.state = { ...DEFAULT_STATE, deviceId: this.deviceId };
       void writeJson(STORAGE_KEY, this.state);
     } else if (this.state.expiresAt > now) {
-      this.state = { ...this.state, active: true };
+      this.state = { ...this.state, active: true, deviceId: this.deviceId };
     } else {
-      this.state = { ...this.state, active: false };
+      this.state = { ...this.state, active: false, deviceId: this.deviceId };
     }
   }
 
@@ -132,28 +144,78 @@ class SubscriptionServiceImpl {
     return PLANS.find((p) => p.id === id);
   }
 
-  async activate(planId: PlanId, paymentId?: string): Promise<SubscriptionState> {
-    const plan = this.getPlan(planId);
-    if (!plan) throw new Error('Unknown plan');
-
-    const now = Date.now();
-    const base = Math.max(now, this.state.expiresAt || 0);
-    const expiresAt = base + plan.days * 24 * 60 * 60 * 1000;
-
+  /**
+   * Apply server-verified entitlement only (no local fake activate).
+   */
+  async applyServerEntitlement(opts: {
+    planId: string;
+    expiresAt: number;
+    paymentId?: string;
+  }): Promise<SubscriptionState> {
+    const planId = (opts.planId === 'bimonthly' ? 'bimonthly' : 'monthly') as PlanId;
     this.state = {
-      active: true,
+      active: opts.expiresAt > Date.now(),
       planId,
-      expiresAt,
-      paymentId: paymentId ?? this.state.paymentId,
-      activatedAt: now,
+      expiresAt: opts.expiresAt,
+      paymentId: opts.paymentId,
+      activatedAt: Date.now(),
+      deviceId: this.deviceId,
     };
     await writeJson(STORAGE_KEY, this.state);
     this.notify();
     return this.getState();
   }
 
+  /**
+   * Secure unlock: Razorpay payment id must pass server verification.
+   */
+  async claimWithPaymentId(paymentId: string): Promise<{ ok: boolean; error?: string }> {
+    const id = paymentId.trim();
+    if (!id.startsWith('pay_') && !id.startsWith('plink_')) {
+      // still try — some flows use other ids; server will reject if invalid
+    }
+    if (id.length < 10) {
+      return { ok: false, error: 'Enter full Razorpay Payment ID (pay_…)' };
+    }
+
+    const result = await claimPremium(id, this.deviceId || (await this.ensureDevice()));
+    if (!result.ok || !result.active || !result.expiresAt) {
+      return { ok: false, error: result.error || 'Payment not verified' };
+    }
+
+    await this.applyServerEntitlement({
+      planId: result.planId || 'monthly',
+      expiresAt: result.expiresAt,
+      paymentId: id,
+    });
+    return { ok: true };
+  }
+
+  private async ensureDevice(): Promise<string> {
+    if (this.deviceId) return this.deviceId;
+    this.deviceId = randomId();
+    await writeJson(DEVICE_KEY, this.deviceId);
+    return this.deviceId;
+  }
+
+  async refreshFromServer(): Promise<void> {
+    try {
+      if (!this.deviceId) return;
+      const s = await fetchPremiumStatus(this.deviceId);
+      if (s.active && s.expiresAt && s.expiresAt > Date.now()) {
+        await this.applyServerEntitlement({
+          planId: (s.planId as string) || 'monthly',
+          expiresAt: s.expiresAt,
+          paymentId: this.state.paymentId,
+        });
+      }
+    } catch {
+      /* offline — keep local cache */
+    }
+  }
+
   async clear(): Promise<void> {
-    this.state = { ...DEFAULT_STATE };
+    this.state = { ...DEFAULT_STATE, deviceId: this.deviceId };
     await writeJson(STORAGE_KEY, this.state);
     this.notify();
   }
