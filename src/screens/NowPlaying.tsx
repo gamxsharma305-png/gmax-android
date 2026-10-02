@@ -59,6 +59,7 @@ export default function NowPlayingScreen() {
   const { isLiked, toggleLike } = useLibrary();
 
   const [savedOffline, setSavedOffline] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [downloadMsg, setDownloadMsg] = useState<string | null>(null);
   const [sleepMinutes, setSleepMinutes] = useState(0);
   const [sleepLeftSec, setSleepLeftSec] = useState(0);
@@ -72,6 +73,9 @@ export default function NowPlayingScreen() {
       return;
     }
     setSavedOffline(LibraryService.isOffline(currentTrack.id));
+    void LibraryService.hasOfflineFile(currentTrack.id).then((ok) => {
+      if (ok) setSavedOffline(true);
+    });
   }, [currentTrack?.id]);
 
   useEffect(() => {
@@ -107,10 +111,8 @@ export default function NowPlayingScreen() {
       setSleepLeftSec(left);
       if (left <= 0) {
         clearSleepTimer();
-        // Pause only — does not tear down MediaSession / engine
         if (isPlaying) togglePlayPause();
         else {
-          // ensure paused if still playing via status lag
           try {
             togglePlayPause();
           } catch {
@@ -121,12 +123,25 @@ export default function NowPlayingScreen() {
     }, 1000);
   };
 
-  const onDownload = () => {
-    if (!currentTrack) return;
-    const result = LibraryService.saveOffline(currentTrack);
-    setSavedOffline(true);
-    setDownloadMsg(result.alreadyHad ? 'Already in Downloads' : 'Saved to Downloads');
-    setTimeout(() => setDownloadMsg(null), 2000);
+  const onDownload = async () => {
+    if (!currentTrack || downloading) return;
+    if (savedOffline) {
+      setDownloadMsg('Already saved offline');
+      setTimeout(() => setDownloadMsg(null), 2000);
+      return;
+    }
+    setDownloading(true);
+    setDownloadMsg('Downloading…');
+    try {
+      const result = await LibraryService.saveOffline(currentTrack);
+      setSavedOffline(true);
+      setDownloadMsg(result.alreadyHad ? 'Already offline' : 'Saved for offline');
+    } catch (e) {
+      setDownloadMsg(e instanceof Error ? e.message : 'Download failed');
+    } finally {
+      setDownloading(false);
+      setTimeout(() => setDownloadMsg(null), 2500);
+    }
   };
 
   if (!currentTrack) {
@@ -156,7 +171,6 @@ export default function NowPlayingScreen() {
         <View style={{ width: 28 }} />
       </View>
 
-      {/* A) Large poster / album art */}
       <View style={styles.artWrap}>
         <Image source={{ uri: currentTrack.albumImageUrl }} style={styles.art} />
       </View>
@@ -221,16 +235,22 @@ export default function NowPlayingScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* B + C) Download | Sleep timer */}
       <View style={styles.extraRow}>
-        <TouchableOpacity style={styles.extraBtn} onPress={onDownload} activeOpacity={0.75}>
-          {savedOffline ? (
+        <TouchableOpacity
+          style={styles.extraBtn}
+          onPress={onDownload}
+          activeOpacity={0.75}
+          disabled={downloading}
+        >
+          {downloading ? (
+            <ActivityIndicator color={COLORS.text.secondary} size="small" />
+          ) : savedOffline ? (
             <Check color={COLORS.accent.green} size={20} />
           ) : (
             <Download color={COLORS.text.secondary} size={20} />
           )}
           <Text style={[styles.extraLabel, savedOffline && { color: COLORS.accent.green }]}>
-            {savedOffline ? 'Saved' : 'Download'}
+            {downloading ? 'Saving…' : savedOffline ? 'Offline' : 'Download'}
           </Text>
         </TouchableOpacity>
 
