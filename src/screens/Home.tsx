@@ -1,49 +1,42 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
+  Image,
+  ScrollView,
   StyleSheet,
   Text,
-  View,
-  ScrollView,
   TouchableOpacity,
-  ActivityIndicator,
+  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Search, Play, Heart, ListMusic, Moon, Target, User } from 'lucide-react-native';
+import { useNavigation } from '@react-navigation/native';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { GlassCard } from '../components/common/GlassCard';
 import { TrackRow } from '../components/lists/TrackRow';
 import { AddToPlaylistSheet } from '../components/lists/AddToPlaylistSheet';
 import { Track } from '../core/types';
-import { FEATURED_QUERY } from '../data/catalog';
+import { HOME_SHELVES } from '../data/homeShelves';
 import { usePlayer } from '../hooks/usePlayer';
 import { useLibrary } from '../hooks/useLibrary';
 import { MusicService } from '../services/MusicService';
 import { MiniPlayer } from '../components/player/MiniPlayer';
 import { StatusBarScrim } from '../components/common/StatusBarScrim';
-import { useNavigation } from '@react-navigation/native';
 
-/** Hindi lo-fi / soft — rotate so each Chill tap feels fresh */
 const CHILL_QUERIES = [
   'Arijit Singh lofi hindi songs soft romantic',
   'hindi lofi mix Arijit Singh chill',
   'Arijit Singh soft songs acoustic',
   'hindi chill lofi romantic night',
-  'Arijit Singh unplugged hindi',
   'bollywood lofi Arijit slow',
-  'hindi romantic slow songs Arijit',
-  'lofi hindi beats soft night',
 ];
 
-/** Punjabi gangster — Sidhu, Subh, Karan Aujla, etc. */
 const FOCUS_QUERIES = [
   'Sidhu Moose Wala Subh Karan Aujla punjabi gangster songs',
   'Sidhu Moose Wala punjabi songs',
   'Karan Aujla punjabi hits',
   'Subh punjabi songs',
   'punjabi gangster mix Sidhu',
-  'Karan Aujla Subh hardcore punjabi',
-  'Sidhu Moose Wala latest punjabi',
-  'punjabi rap Sidhu Karan Aujla',
 ];
 
 function pickRandom<T>(arr: T[]): T {
@@ -59,7 +52,6 @@ function shuffleTracks(tracks: Track[]): Track[] {
   return a;
 }
 
-/** Website-parity quick actions: Liked | Playlist | Chill | Focus */
 const ACTIONS = [
   { id: 'liked', label: 'Liked', Icon: Heart },
   { id: 'playlist', label: 'Playlist', Icon: ListMusic },
@@ -70,6 +62,68 @@ const ACTIONS = [
 const greetingFor = (hour: number) =>
   hour < 12 ? 'Good morning,' : hour < 18 ? 'Good afternoon,' : 'Good evening,';
 
+const CARD_W = 140;
+
+function ShelfCard({
+  track,
+  onPress,
+}: {
+  track: Track;
+  onPress: () => void;
+}) {
+  const uri = track.albumImageUrl || '';
+  const artist = track.artist?.name || 'Unknown';
+  return (
+    <TouchableOpacity style={styles.shelfCard} onPress={onPress} activeOpacity={0.85}>
+      {uri ? (
+        <Image source={{ uri }} style={styles.shelfCover} />
+      ) : (
+        <View style={[styles.shelfCover, styles.shelfCoverPlaceholder]}>
+          <Play color={COLORS.text.muted} size={28} />
+        </View>
+      )}
+      <Text style={styles.shelfTitle} numberOfLines={2}>
+        {track.title}
+      </Text>
+      <Text style={styles.shelfArtist} numberOfLines={1}>
+        {artist}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
+function HorizontalShelf({
+  title,
+  tracks,
+  loading,
+  onPlay,
+}: {
+  title: string;
+  tracks: Track[];
+  loading?: boolean;
+  onPlay: (t: Track, list: Track[]) => void;
+}) {
+  if (!loading && tracks.length === 0) return null;
+  return (
+    <View style={styles.shelf}>
+      <Text style={styles.shelfHeading}>{title}</Text>
+      {loading && tracks.length === 0 ? (
+        <ActivityIndicator color={COLORS.text.secondary} style={{ marginVertical: 16 }} />
+      ) : (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.shelfRow}
+        >
+          {tracks.map((t) => (
+            <ShelfCard key={t.id} track={t} onPress={() => onPlay(t, tracks)} />
+          ))}
+        </ScrollView>
+      )}
+    </View>
+  );
+}
+
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
@@ -77,32 +131,11 @@ export default function HomeScreen() {
   const { recentlyPlayed, liked, profile } = useLibrary();
 
   const [pendingAction, setPendingAction] = useState<string | null>(null);
-  const [featured, setFeatured] = useState<Track[]>([]);
-  const [starter, setStarter] = useState<Track[]>([]);
   const [addingTrack, setAddingTrack] = useState<Track | null>(null);
-
-  const hasRecents = recentlyPlayed.length > 0;
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const results = await MusicService.search(FEATURED_QUERY || 'trending music', {
-          filter: 'Songs',
-          limit: 12,
-        });
-        if (!cancelled) {
-          setFeatured(results.tracks.slice(0, 1));
-          setStarter(results.tracks.slice(0, 8));
-        }
-      } catch {
-        // ignore
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const [shelves, setShelves] = useState<Record<string, Track[]>>({});
+  const [shelvesLoading, setShelvesLoading] = useState(true);
+  const [basedOn, setBasedOn] = useState<Track[]>([]);
+  const [basedTitle, setBasedTitle] = useState('Based on your recent listening');
 
   const onPlay = useCallback(
     (track: Track, list?: Track[]) => {
@@ -110,6 +143,61 @@ export default function HomeScreen() {
     },
     [playTrack]
   );
+
+  // Load all category shelves in parallel
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setShelvesLoading(true);
+      const entries = await Promise.all(
+        HOME_SHELVES.map(async (s) => {
+          try {
+            const res = await MusicService.search(s.query, {
+              filter: 'Songs',
+              limit: s.limit ?? 12,
+            });
+            return [s.id, res.tracks] as const;
+          } catch {
+            return [s.id, [] as Track[]] as const;
+          }
+        })
+      );
+      if (cancelled) return;
+      const map: Record<string, Track[]> = {};
+      for (const [id, tracks] of entries) map[id] = tracks;
+      setShelves(map);
+      setShelvesLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // “Based on recent listening” from last played artist/title
+  useEffect(() => {
+    let cancelled = false;
+    const seed = recentlyPlayed[0];
+    if (!seed) {
+      setBasedOn([]);
+      return;
+    }
+    const artist = seed.artist?.name || '';
+    const q = artist
+      ? `${artist} songs hits`
+      : `${seed.title} similar songs`;
+    setBasedTitle(artist ? `More like ${artist}` : 'Based on your recent listening');
+    (async () => {
+      try {
+        const res = await MusicService.search(q, { filter: 'Songs', limit: 12 });
+        if (!cancelled) setBasedOn(res.tracks);
+      } catch {
+        if (!cancelled) setBasedOn([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [recentlyPlayed]);
 
   const runAction = useCallback(
     async (id: string) => {
@@ -124,12 +212,10 @@ export default function HomeScreen() {
         navigation.navigate('LibraryTab' as never);
         return;
       }
-
       let query: string | null = null;
       if (id === 'chill') query = pickRandom(CHILL_QUERIES);
       else if (id === 'focus') query = pickRandom(FOCUS_QUERIES);
       if (!query) return;
-
       setPendingAction(id);
       try {
         const results = await MusicService.search(query, { filter: 'Songs', limit: 30 });
@@ -138,7 +224,7 @@ export default function HomeScreen() {
           onPlay(mixed[0], mixed);
         }
       } catch {
-        // ignore
+        /* ignore */
       } finally {
         setPendingAction(null);
       }
@@ -146,7 +232,7 @@ export default function HomeScreen() {
     [liked, onPlay, navigation]
   );
 
-  const list = hasRecents ? recentlyPlayed : starter;
+  const recents = useMemo(() => recentlyPlayed.slice(0, 16), [recentlyPlayed]);
 
   return (
     <View style={styles.container}>
@@ -175,67 +261,68 @@ export default function HomeScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={{ paddingBottom: SIZES.bottomInset, paddingHorizontal: SIZES.md }}
+        contentContainerStyle={{ paddingBottom: SIZES.bottomInset }}
         showsVerticalScrollIndicator={false}
       >
-        {featured[0] && (
-          <GlassCard intensity={30} style={styles.featuredCard}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.featuredLabel}>FEATURED</Text>
-              <Text style={styles.featuredText} numberOfLines={2}>
-                {featured[0].title}
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={styles.featuredPlayBtn}
-              onPress={() => onPlay(featured[0], featured)}
-            >
-              <Play color={COLORS.background} size={22} fill={COLORS.background} />
-            </TouchableOpacity>
-          </GlassCard>
+        <View style={styles.actionsPad}>
+          <View style={styles.actionsRow}>
+            {ACTIONS.map(({ id, label, Icon }) => (
+              <TouchableOpacity
+                key={id}
+                style={styles.actionTouchable}
+                onPress={() => runAction(id)}
+                disabled={pendingAction === id}
+              >
+                <GlassCard intensity={20} style={styles.actionCard}>
+                  {pendingAction === id ? (
+                    <ActivityIndicator color={COLORS.text.primary} />
+                  ) : (
+                    <Icon color={COLORS.text.secondary} size={22} />
+                  )}
+                  <Text style={styles.actionText}>{label}</Text>
+                </GlassCard>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+        {/* Recents — horizontal like Spotify */}
+        {recents.length > 0 && (
+          <HorizontalShelf
+            title="Recents"
+            tracks={recents}
+            onPlay={onPlay}
+          />
         )}
 
-        <View style={styles.actionsRow}>
-          {ACTIONS.map(({ id, label, Icon }) => (
-            <TouchableOpacity
-              key={id}
-              style={styles.actionTouchable}
-              onPress={() => runAction(id)}
-              disabled={pendingAction === id}
-            >
-              <GlassCard intensity={20} style={styles.actionCard}>
-                {pendingAction === id ? (
-                  <ActivityIndicator color={COLORS.text.primary} />
-                ) : (
-                  <Icon color={COLORS.text.secondary} size={22} />
-                )}
-                <Text style={styles.actionText}>{label}</Text>
-              </GlassCard>
-            </TouchableOpacity>
-          ))}
-        </View>
+        {basedOn.length > 0 && (
+          <HorizontalShelf title={basedTitle} tracks={basedOn} onPlay={onPlay} />
+        )}
 
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>
-            {hasRecents ? 'Recently played' : 'Suggested for you'}
-          </Text>
-        </View>
+        {HOME_SHELVES.map((s) => (
+          <HorizontalShelf
+            key={s.id}
+            title={s.title}
+            tracks={shelves[s.id] || []}
+            loading={shelvesLoading}
+            onPlay={onPlay}
+          />
+        ))}
 
-        {list.length === 0 ? (
-          <GlassCard intensity={20} style={styles.emptyCard}>
-            <Text style={styles.emptyText}>Nothing here yet.</Text>
-            <Text style={styles.emptyHint}>Search for a song to get started.</Text>
-          </GlassCard>
-        ) : (
-          list.map((track) => (
-            <TrackRow
-              key={track.id}
-              track={track}
-              onPress={(t) => onPlay(t, list)}
-              onMorePress={setAddingTrack}
-              isPlaying={currentTrack?.id === track.id && isPlaying}
-            />
-          ))
+        {/* Vertical list of first recommended for quick browse */}
+        {(shelves.recommended || []).length > 0 && (
+          <View style={styles.listSection}>
+            <Text style={styles.shelfHeading}>Quick play</Text>
+            {(shelves.recommended || []).slice(0, 6).map((track) => (
+              <TrackRow
+                key={`q-${track.id}`}
+                track={track}
+                onPress={(t) => onPlay(t, shelves.recommended)}
+                onMorePress={setAddingTrack}
+                isPlaying={currentTrack?.id === track.id && isPlaying}
+              />
+            ))}
+          </View>
         )}
       </ScrollView>
 
@@ -295,29 +382,8 @@ const styles = StyleSheet.create({
     paddingVertical: SIZES.sm + 4,
   },
   searchPlaceholder: { fontFamily: FONTS.regular, fontSize: 14, color: COLORS.text.secondary },
-  featuredCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: SIZES.md,
-    marginBottom: SIZES.lg,
-  },
-  featuredLabel: {
-    fontFamily: FONTS.regular,
-    fontSize: 10,
-    letterSpacing: 2,
-    color: COLORS.text.muted,
-    marginBottom: 4,
-  },
-  featuredText: { fontFamily: FONTS.medium, fontSize: 16, color: COLORS.text.primary },
-  featuredPlayBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: COLORS.text.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  actionsRow: { flexDirection: 'row', marginBottom: SIZES.xl },
+  actionsPad: { paddingHorizontal: SIZES.md, marginBottom: SIZES.md },
+  actionsRow: { flexDirection: 'row' },
   actionTouchable: { flex: 1 },
   actionCard: {
     marginHorizontal: 4,
@@ -326,14 +392,34 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   actionText: { fontFamily: FONTS.regular, fontSize: 10, color: COLORS.text.secondary },
-  sectionHeader: { marginBottom: SIZES.sm },
-  sectionTitle: { fontFamily: FONTS.medium, fontSize: 18, color: COLORS.text.primary },
-  emptyCard: { padding: SIZES.md },
-  emptyText: { fontFamily: FONTS.medium, fontSize: 14, color: COLORS.text.primary },
-  emptyHint: {
+  shelf: { marginBottom: SIZES.lg },
+  shelfHeading: {
+    fontFamily: FONTS.bold,
+    fontSize: 20,
+    color: COLORS.text.primary,
+    paddingHorizontal: SIZES.md,
+    marginBottom: SIZES.sm,
+  },
+  shelfRow: { paddingHorizontal: SIZES.md, gap: 12 },
+  shelfCard: { width: CARD_W },
+  shelfCover: {
+    width: CARD_W,
+    height: CARD_W,
+    borderRadius: 8,
+    backgroundColor: COLORS.surfaceRaised,
+  },
+  shelfCoverPlaceholder: { alignItems: 'center', justifyContent: 'center' },
+  shelfTitle: {
+    fontFamily: FONTS.medium,
+    fontSize: 13,
+    color: COLORS.text.primary,
+    marginTop: 8,
+  },
+  shelfArtist: {
     fontFamily: FONTS.regular,
     fontSize: 12,
     color: COLORS.text.secondary,
-    marginTop: 4,
+    marginTop: 2,
   },
+  listSection: { paddingHorizontal: SIZES.md, marginBottom: SIZES.xl },
 });
