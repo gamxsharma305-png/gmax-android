@@ -10,12 +10,13 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Plus, Heart, ListMusic, X } from 'lucide-react-native';
+import { Plus, Heart, ListMusic, X, Lock } from 'lucide-react-native';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { MiniPlayer } from '../components/player/MiniPlayer';
 import { StatusBarScrim } from '../components/common/StatusBarScrim';
 import { useLibrary } from '../hooks/useLibrary';
 import { usePlayer } from '../hooks/usePlayer';
+import { useSubscription } from '../hooks/useSubscription';
 import { useNavigation } from '@react-navigation/native';
 import { AUTO_PLAYLISTS } from '../data/catalog';
 import { MusicService } from '../services/MusicService';
@@ -25,11 +26,18 @@ export default function LibraryScreen() {
   const navigation = useNavigation();
   const { playlists, likedPlaylist, createPlaylist } = useLibrary();
   const { currentTrack, isPlaying, isLoading, togglePlayPause, playTrack } = usePlayer();
+  const { isPremium, canCreatePlaylist, canUseAutoPlaylist } = useSubscription();
 
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [loadingGenre, setLoadingGenre] = useState<string | null>(null);
   const [autoError, setAutoError] = useState<string | null>(null);
+
+  // User playlists excluding system "Downloads"
+  const userPlaylists = useMemo(
+    () => playlists.filter((p) => p.name !== 'Downloads'),
+    [playlists]
+  );
 
   const ordered = useMemo(
     () => [...playlists].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0)),
@@ -40,17 +48,36 @@ export default function LibraryScreen() {
     navigation.navigate('Playlist' as never, { playlistId: id } as never);
   };
 
+  const openPaywall = () => navigation.navigate('Paywall' as never);
+
   const onCreate = () => {
     const name = newName.trim();
     if (!name) return;
+    if (!canCreatePlaylist(userPlaylists.length)) {
+      setCreating(false);
+      openPaywall();
+      return;
+    }
     const p = createPlaylist(name);
     setNewName('');
     setCreating(false);
     openPlaylist(p.id);
   };
 
+  const onPressCreate = () => {
+    if (!canCreatePlaylist(userPlaylists.length)) {
+      openPaywall();
+      return;
+    }
+    setCreating((v) => !v);
+  };
+
   const playAutoMix = useCallback(
     async (mix: (typeof AUTO_PLAYLISTS)[0], save: boolean) => {
+      if (!canUseAutoPlaylist()) {
+        openPaywall();
+        return;
+      }
       if (loadingGenre) return;
       setAutoError(null);
       setLoadingGenre(mix.id);
@@ -76,7 +103,7 @@ export default function LibraryScreen() {
         setLoadingGenre(null);
       }
     },
-    [loadingGenre, playTrack, playlists, createPlaylist]
+    [loadingGenre, playTrack, playlists, createPlaylist, canUseAutoPlaylist]
   );
 
   const data = [
@@ -91,14 +118,26 @@ export default function LibraryScreen() {
 
   const ListFooter = (
     <View style={{ marginTop: SIZES.lg }}>
-      <Text style={styles.sectionLabel}>AUTO PLAYLIST</Text>
-      <Text style={styles.hint}>Tap to play · long-press to save in library</Text>
+      <View style={styles.sectionRow}>
+        <Text style={styles.sectionLabel}>AUTO PLAYLIST</Text>
+        {!isPremium ? (
+          <TouchableOpacity onPress={openPaywall} style={styles.lockPill}>
+            <Lock color={COLORS.accent.green} size={12} />
+            <Text style={styles.lockPillText}>Premium</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+      <Text style={styles.hint}>
+        {isPremium
+          ? 'Tap to play · long-press to save in library'
+          : 'Unlock with Premium (₹19/mo) to play all mixes'}
+      </Text>
       {autoError ? <Text style={styles.error}>{autoError}</Text> : null}
       <View style={styles.mixGrid}>
         {AUTO_PLAYLISTS.map((g) => (
           <TouchableOpacity
             key={g.id}
-            style={[styles.mixCard, { borderLeftColor: g.color }]}
+            style={[styles.mixCard, { borderLeftColor: g.color }, !isPremium && styles.mixLocked]}
             onPress={() => void playAutoMix(g, false)}
             onLongPress={() => void playAutoMix(g, true)}
             activeOpacity={0.75}
@@ -107,9 +146,12 @@ export default function LibraryScreen() {
               <ActivityIndicator size="small" color={g.color} />
             ) : (
               <>
-                <Text style={styles.mixName} numberOfLines={1}>
-                  {g.name}
-                </Text>
+                <View style={styles.mixTitleRow}>
+                  <Text style={styles.mixName} numberOfLines={1}>
+                    {g.name}
+                  </Text>
+                  {!isPremium ? <Lock color={COLORS.text.muted} size={12} /> : null}
+                </View>
                 <Text style={styles.mixDesc} numberOfLines={1}>
                   {g.description}
                 </Text>
@@ -127,7 +169,7 @@ export default function LibraryScreen() {
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + SIZES.lg }]}>
         <Text style={styles.title}>Your Library</Text>
-        <TouchableOpacity onPress={() => setCreating((v) => !v)} hitSlop={12}>
+        <TouchableOpacity onPress={onPressCreate} hitSlop={12}>
           {creating ? (
             <X color={COLORS.text.primary} size={24} />
           ) : (
@@ -219,6 +261,28 @@ const styles = StyleSheet.create({
     color: COLORS.text.muted,
     marginBottom: 6,
   },
+  sectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  lockPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: COLORS.surfaceRaised,
+    borderWidth: 1,
+    borderColor: COLORS.glassBorder,
+  },
+  lockPillText: {
+    fontFamily: FONTS.medium,
+    fontSize: 11,
+    color: COLORS.accent.green,
+  },
   hint: {
     fontFamily: FONTS.regular,
     fontSize: 12,
@@ -252,7 +316,9 @@ const styles = StyleSheet.create({
     minHeight: 64,
     justifyContent: 'center',
   },
-  mixName: { fontFamily: FONTS.medium, fontSize: 14, color: COLORS.text.primary },
+  mixLocked: { opacity: 0.55 },
+  mixTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 },
+  mixName: { fontFamily: FONTS.medium, fontSize: 14, color: COLORS.text.primary, flex: 1 },
   mixDesc: { fontFamily: FONTS.regular, fontSize: 11, color: COLORS.text.secondary, marginTop: 2 },
   createRow: {
     flexDirection: 'row',
