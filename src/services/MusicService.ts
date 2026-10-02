@@ -136,12 +136,13 @@ class MusicServiceImpl {
     return { track: await provider.getMetadata(parsed.id, signal) };
   }
 
-  /** All providers go through streamResolver (direct URL / Saavn match / YT endpoints). */
+  /** All providers go through streamResolver (local / direct / NewPipe / endpoints). */
   async resolveStream(track: Track, signal?: AbortSignal) {
     return streamResolver.resolve(track, signal);
   }
 
   canPlay(track: Track): boolean {
+    if (track.localUri) return true;
     if (track.audioUrl) return true;
     if (track.provider === 'youtube' && track.sourceId) return true;
     return streamResolver.canResolve(track);
@@ -149,7 +150,7 @@ class MusicServiceImpl {
 
   prefetchStream(track: Track | null): void {
     if (!track) return;
-    if (track.audioUrl) return;
+    if (track.localUri || track.audioUrl) return;
     if (!streamResolver.canResolve(track)) return;
     if (streamResolver.peek(track)) return;
     void streamResolver.resolve(track).catch(() => undefined);
