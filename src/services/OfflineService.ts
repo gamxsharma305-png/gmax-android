@@ -1,9 +1,15 @@
 /**
- * Offline audio — YouTube only (Musify / NewPipe progressive audio).
- * Resumable download + size checks so files finish completely.
+ * Offline audio — YouTube only.
+ * Primary: native NoteNative.downloadYouTubeAudio (Musify-style full stream).
+ * Fallback: JS download of progressive URL (often incomplete on YT).
  */
+import { Platform } from 'react-native';
 import { Track } from '../core/types';
 import { MusicService } from './MusicService';
+import {
+  downloadYouTubeAudio as nativeDownloadYouTubeAudio,
+  isNoteNativeAvailable,
+} from '../../modules/note-native';
 
 type ProgressCb = (p: { written: number; total: number }) => void;
 
@@ -55,11 +61,16 @@ function safeName(trackId: string): string {
   return trackId.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120);
 }
 
-/** Soft floor — primary check is Content-Length match */
 function minBytesFor(track: Track): number {
   const dur = Number(track.duration) || 0;
-  if (dur > 0) return Math.max(40_000, Math.floor(dur * 4_000)); // ~32kbps floor
+  if (dur > 0) return Math.max(40_000, Math.floor(dur * 4_000));
   return 40_000;
+}
+
+/** file:///path or path → absolute path without scheme */
+function toAbsolutePath(fileUri: string): string {
+  if (fileUri.startsWith('file://')) return fileUri.replace(/^file:\/\//, '');
+  return fileUri;
 }
 
 async function ensureDir(): Promise<void> {
@@ -95,7 +106,6 @@ async function downloadUrlToPath(
     /* ok */
   }
 
-  // Prefer resumable — better for long YouTube progressive streams
   let status = 0;
   let respHeaders: Record<string, string> = {};
 
@@ -134,12 +144,9 @@ async function downloadUrlToPath(
   const size = info.size ?? 0;
 
   const clRaw =
-    respHeaders['Content-Length'] ||
-    respHeaders['content-length'] ||
-    '';
+    respHeaders['Content-Length'] || respHeaders['content-length'] || '';
   const contentLength = Number(clRaw);
 
-  // If server announced size, require ~full body (Musify-style complete file)
   if (Number.isFinite(contentLength) && contentLength > 10_000) {
     if (size < contentLength * 0.98) {
       try {
@@ -160,8 +167,9 @@ async function downloadUrlToPath(
 }
 
 /**
- * Download THIS YouTube song fully (NewPipe progressive audio).
- * Never swaps to Saavn.
+ * One-click full YouTube offline download.
+ * 1) Native Kotlin stream-to-file (complete)
+ * 2) JS fallback only if native missing
  */
 export async function downloadTrackAudio(
   track: Track,
@@ -189,15 +197,61 @@ export async function downloadTrackAudio(
     }
   }
 
-  let lastErr: Error | null = null;
+  if (signal?.aborted) throw new Error('Download cancelled');
 
-  // Up to 4 attempts with FRESH YouTube URL each time (URLs expire / truncate)
-  for (let attempt = 0; attempt < 4; attempt++) {
+  // Resolve YouTube video id (same song, not Saavn)
+  const ytTrack = await MusicService.resolveYouTubeTrackForOffline(track, signal);
+  const videoId = ytTrack.sourceId;
+  if (!videoId) {
+    throw new Error('No YouTube video id for this track');
+  }
+
+  // ——— Native full download (Musify pattern) ———
+  if (Platform.OS === 'android' && isNoteNativeAvailable()) {
+    try {
+      // Wipe partial
+      try {
+        await FileSystem.deleteAsync(path, { idempotent: true });
+      } catch {
+        /* ok */
+      }
+
+      const abs = toAbsolutePath(path);
+      const result = await nativeDownloadYouTubeAudio(videoId, abs);
+
+      if (result.ok) {
+        const info = await FileSystem.getInfoAsync(path);
+        const size = info.size ?? result.bytes ?? 0;
+        if (size >= minBytes || size >= 40_000) {
+          onProgress?.({ written: size, total: size });
+          return {
+            localUri: path.startsWith('file://') ? path : `file://${abs}`,
+            alreadyHad: false,
+            youtubeId: videoId,
+          };
+        }
+        throw new Error(`Native file too small (${size})`);
+      }
+
+      if (__DEV__) {
+        console.warn('[Offline] native download failed:', result.reason, result.message);
+      }
+    } catch (e) {
+      if (__DEV__) {
+        console.warn('[Offline] native download error:', e);
+      }
+      // fall through to JS path
+    }
+  }
+
+  if (signal?.aborted) throw new Error('Download cancelled');
+
+  // ——— JS fallback (less reliable on YouTube) ———
+  let lastErr: Error | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
     if (signal?.aborted) throw new Error('Download cancelled');
     try {
-      const stream = await MusicService.resolveStreamForOffline(track, signal);
-      if (signal?.aborted) throw new Error('Download cancelled');
-
+      const stream = await MusicService.resolveStreamForOffline(ytTrack, signal);
       const doc = FileSystem.documentDirectory ?? '';
       if (stream.url.startsWith('file://') || (doc && stream.url.startsWith(doc))) {
         return { localUri: stream.url, alreadyHad: true };
@@ -215,13 +269,11 @@ export async function downloadTrackAudio(
       return {
         localUri: path,
         alreadyHad: false,
-        youtubeId: track.provider === 'youtube' ? track.sourceId : undefined,
+        youtubeId: videoId,
       };
     } catch (e) {
       lastErr = e instanceof Error ? e : new Error(String(e));
-      if (signal?.aborted) throw new Error('Download cancelled');
-      // brief pause before re-resolving stream
-      await new Promise((r) => setTimeout(r, 400 + attempt * 300));
+      await new Promise((r) => setTimeout(r, 500 + attempt * 400));
     }
   }
 
