@@ -3,6 +3,8 @@ import {
   ActivityIndicator,
   Linking,
   Modal,
+  Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -10,13 +12,22 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { WebView } from 'react-native-webview';
+import { WebView, WebViewNavigation } from 'react-native-webview';
 import { ChevronLeft, Check, Crown, Lock } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import { COLORS, FONTS, SIZES } from '../constants/theme';
 import { useSubscription } from '../hooks/useSubscription';
 import { Plan, PlanId } from '../services/SubscriptionService';
 import { PREMIUM_API_BASE } from '../services/PremiumApi';
+
+/** Chrome mobile UA — Razorpay shows UPI / PhonePe / GPay properly */
+const CHROME_UA =
+  'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+
+function extractPaymentId(url: string): string | null {
+  const m = url.match(/[?&](?:razorpay_)?payment_id=([^&]+)/i);
+  return m?.[1] ? decodeURIComponent(m[1]) : null;
+}
 
 export default function PaywallScreen() {
   const insets = useSafeAreaInsets();
@@ -33,21 +44,36 @@ export default function PaywallScreen() {
 
   const selectedPlan = plans.find((p) => p.id === selected) ?? plans[0];
 
-  const openPayment = useCallback((plan: Plan) => {
-    pendingPlan.current = plan.id;
-    setMsg(null);
-    setErr(null);
-    setWebUrl(plan.paymentLink);
-  }, []);
+  /** Preferred: system browser — full UPI apps + scroll works */
+  const openInBrowser = useCallback(
+    async (plan?: Plan) => {
+      const p = plan ?? selectedPlan;
+      if (!p?.paymentLink) return;
+      pendingPlan.current = p.id;
+      setMsg(null);
+      setErr(null);
+      try {
+        const can = await Linking.canOpenURL(p.paymentLink);
+        if (can) {
+          await Linking.openURL(p.paymentLink);
+          setMsg('Browser me pay karo → wapas aao → Payment ID (pay_…) daalo → Unlock');
+        } else {
+          setWebUrl(p.paymentLink);
+        }
+      } catch {
+        setWebUrl(p.paymentLink);
+      }
+    },
+    [selectedPlan]
+  );
 
-  const openInBrowser = useCallback(async () => {
+  /** In-app WebView fallback (full screen, UPI intent support) */
+  const openInWebView = useCallback(() => {
     if (!selectedPlan?.paymentLink) return;
     pendingPlan.current = selectedPlan.id;
-    try {
-      await Linking.openURL(selectedPlan.paymentLink);
-    } catch {
-      setErr('Could not open payment page');
-    }
+    setMsg(null);
+    setErr(null);
+    setWebUrl(selectedPlan.paymentLink);
   }, [selectedPlan]);
 
   const onClaim = useCallback(async () => {
@@ -58,7 +84,7 @@ export default function PaywallScreen() {
     }
     setClaiming(true);
     setErr(null);
-    setMsg('Verifying with Razorpay…');
+    setMsg('Verifying…');
     const result = await claimWithPaymentId(id);
     setClaiming(false);
     if (!result.ok) {
@@ -71,6 +97,40 @@ export default function PaywallScreen() {
     setTimeout(() => navigation.goBack(), 900);
   }, [paymentIdInput, claimWithPaymentId, navigation]);
 
+  const onNavChange = useCallback((nav: WebViewNavigation) => {
+    const u = nav.url || '';
+    const pid = extractPaymentId(u);
+    if (pid) setPaymentIdInput(pid);
+    if (u.includes('payment-success') || u.includes('gmax-premium-api')) {
+      const fromHash = u.match(/pay_[A-Za-z0-9]+/);
+      if (fromHash) setPaymentIdInput(fromHash[0]);
+    }
+  }, []);
+
+  /** Open UPI / PhonePe / GPay intents outside WebView */
+  const onShouldStart = useCallback((req: { url: string }) => {
+    const url = req.url || '';
+    if (
+      url.startsWith('upi://') ||
+      url.startsWith('phonepe://') ||
+      url.startsWith('paytmmp://') ||
+      url.startsWith('gpay://') ||
+      url.startsWith('tez://') ||
+      url.startsWith('intent://') ||
+      url.startsWith('market://')
+    ) {
+      Linking.openURL(url).catch(() => {
+        // intent:// fallback: try extracting browser_fallback_url
+        const fb = url.match(/browser_fallback_url=([^;]+)/);
+        if (fb?.[1]) {
+          void Linking.openURL(decodeURIComponent(fb[1]));
+        }
+      });
+      return false;
+    }
+    return true;
+  }, []);
+
   return (
     <View style={[styles.container, { paddingTop: insets.top + SIZES.sm }]}>
       <View style={styles.header}>
@@ -81,7 +141,14 @@ export default function PaywallScreen() {
         <View style={{ width: 26 }} />
       </View>
 
-      <View style={styles.body}>
+      <ScrollView
+        contentContainerStyle={{
+          paddingHorizontal: SIZES.md,
+          paddingBottom: insets.bottom + 40,
+        }}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator
+      >
         <View style={styles.hero}>
           <Crown color={COLORS.accent.green} size={36} />
           <Text style={styles.heroTitle}>
@@ -90,7 +157,7 @@ export default function PaywallScreen() {
           <Text style={styles.heroSub}>
             {isPremium
               ? `${daysLeft} day${daysLeft === 1 ? '' : 's'} left · ${state.planId ?? ''}`
-              : 'Pay → enter Payment ID → server verifies → unlock'}
+              : 'Pay in browser (UPI) → enter Payment ID → unlock'}
           </Text>
         </View>
 
@@ -128,22 +195,30 @@ export default function PaywallScreen() {
               );
             })}
 
+            {/* Primary: browser — UPI always works */}
             <TouchableOpacity
               style={styles.payBtn}
-              onPress={() => selectedPlan && openPayment(selectedPlan)}
+              onPress={() => void openInBrowser()}
               activeOpacity={0.85}
             >
-              <Text style={styles.payBtnText}>Pay ₹{selectedPlan?.priceInr} with Razorpay</Text>
+              <Text style={styles.payBtnText}>
+                Pay ₹{selectedPlan?.priceInr} (Browser · UPI)
+              </Text>
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={() => void openInBrowser()} style={styles.linkBtn}>
-              <Text style={styles.linkText}>Open in browser</Text>
+            <TouchableOpacity onPress={openInWebView} style={styles.linkBtn}>
+              <Text style={styles.linkText}>Open inside app (WebView)</Text>
             </TouchableOpacity>
 
-            <Text style={[styles.sectionLabel, { marginTop: SIZES.lg }]}>2. CLAIM (SECURE)</Text>
+            <Text style={styles.tip}>
+              Tip: Browser me UPI / PhonePe / GPay sab dikhte hain. App WebView me kabhi-kabhi UPI
+              hide ho jata hai — isliye Browser button recommended.
+            </Text>
+
+            <Text style={[styles.sectionLabel, { marginTop: SIZES.lg }]}>2. CLAIM</Text>
             <Text style={styles.claimHint}>
-              Payment ke baad Razorpay Payment ID (pay_…) daalo. Server Razorpay se check karega —
-              tabhi Premium on hoga. Fake ID se unlock nahi hoga.
+              Payment ke baad Razorpay se Payment ID (pay_…) copy karke yahan paste karo, phir
+              Verify & Unlock.
             </Text>
             <TextInput
               style={styles.input}
@@ -168,7 +243,7 @@ export default function PaywallScreen() {
 
             {!PREMIUM_API_BASE ? (
               <Text style={styles.warn}>
-                PREMIUM_API_BASE empty — pehle Vercel pe gmax-premium-api deploy karke URL set karo.
+                PREMIUM_API_BASE empty — Vercel deploy + URL set karo.
               </Text>
             ) : null}
           </>
@@ -178,11 +253,11 @@ export default function PaywallScreen() {
         {err ? <Text style={styles.err}>{err}</Text> : null}
 
         <Text style={styles.footnote}>
-          Unlock only after Razorpay confirms payment on our server. Key Secret never leaves the
-          server.
+          Unlock only after server confirms payment (webhook). Fake ID se unlock nahi hoga.
         </Text>
-      </View>
+      </ScrollView>
 
+      {/* Full-screen WebView — no bottom bar blocking Pay button */}
       <Modal visible={!!webUrl} animationType="slide" onRequestClose={() => setWebUrl(null)}>
         <View style={[styles.webWrap, { paddingTop: insets.top }]}>
           <View style={styles.webBar}>
@@ -190,29 +265,38 @@ export default function PaywallScreen() {
               <Text style={styles.webClose}>Close</Text>
             </TouchableOpacity>
             <Text style={styles.webTitle}>Razorpay</Text>
-            <View style={{ width: 48 }} />
+            <TouchableOpacity
+              onPress={() => {
+                if (webUrl) void Linking.openURL(webUrl);
+              }}
+            >
+              <Text style={styles.webBrowser}>Browser</Text>
+            </TouchableOpacity>
           </View>
           {webUrl ? (
             <WebView
               source={{ uri: webUrl }}
-              onNavigationStateChange={(nav) => {
-                const u = nav.url || '';
-                const m = u.match(/[?&](?:razorpay_)?payment_id=([^&]+)/i);
-                if (m?.[1]) setPaymentIdInput(decodeURIComponent(m[1]));
-              }}
-              startInLoadingState
               style={{ flex: 1, backgroundColor: '#fff' }}
+              userAgent={CHROME_UA}
+              javaScriptEnabled
+              domStorageEnabled
+              startInLoadingState
+              scalesPageToFit
+              setSupportMultipleWindows={false}
+              originWhitelist={['*']}
+              mixedContentMode="always"
+              thirdPartyCookiesEnabled
+              sharedCookiesEnabled
+              allowsInlineMediaPlayback
+              onNavigationStateChange={onNavChange}
+              onShouldStartLoadWithRequest={onShouldStart}
+              {...(Platform.OS === 'android'
+                ? { nestedScrollEnabled: true, overScrollMode: 'always' as const }
+                : {})}
             />
           ) : null}
-          <View style={[styles.webFooter, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-            <Text style={styles.webFooterHint}>
-              Pay complete ke baad Payment ID neeche claim box me aana chahiye. Phir Close karke
-              Verify & Unlock dabao.
-            </Text>
-            <TouchableOpacity style={styles.webUnlockBtn} onPress={() => setWebUrl(null)}>
-              <Text style={styles.webUnlockText}>Close & enter Payment ID</Text>
-            </TouchableOpacity>
-          </View>
+          {/* Thin safe bar only — does NOT cover payment methods */}
+          <View style={{ height: Math.max(insets.bottom, 8), backgroundColor: '#fff' }} />
         </View>
       </Modal>
     </View>
@@ -229,7 +313,6 @@ const styles = StyleSheet.create({
     paddingBottom: SIZES.md,
   },
   headerTitle: { fontFamily: FONTS.bold, fontSize: 18, color: COLORS.text.primary },
-  body: { flex: 1, paddingHorizontal: SIZES.md },
   hero: { alignItems: 'center', marginBottom: SIZES.lg, gap: 8 },
   heroTitle: { fontFamily: FONTS.bold, fontSize: 24, color: COLORS.text.primary },
   heroSub: {
@@ -283,6 +366,13 @@ const styles = StyleSheet.create({
   payBtnText: { fontFamily: FONTS.bold, fontSize: 16, color: COLORS.background },
   linkBtn: { alignItems: 'center', paddingVertical: 10 },
   linkText: { fontFamily: FONTS.medium, fontSize: 13, color: COLORS.text.secondary },
+  tip: {
+    fontFamily: FONTS.regular,
+    fontSize: 12,
+    color: COLORS.text.muted,
+    lineHeight: 18,
+    marginTop: 4,
+  },
   claimHint: {
     fontFamily: FONTS.regular,
     fontSize: 12,
@@ -339,7 +429,7 @@ const styles = StyleSheet.create({
     marginTop: SIZES.lg,
     lineHeight: 16,
   },
-  webWrap: { flex: 1, backgroundColor: COLORS.background },
+  webWrap: { flex: 1, backgroundColor: '#fff' },
   webBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -347,29 +437,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: SIZES.md,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.glassBorder,
+    borderBottomColor: '#eee',
+    backgroundColor: COLORS.background,
   },
   webClose: { fontFamily: FONTS.medium, fontSize: 15, color: COLORS.text.secondary },
   webTitle: { fontFamily: FONTS.bold, fontSize: 15, color: COLORS.text.primary },
-  webFooter: {
-    paddingHorizontal: SIZES.md,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.glassBorder,
-    backgroundColor: COLORS.surfaceRaised,
-  },
-  webFooterHint: {
-    fontFamily: FONTS.regular,
-    fontSize: 12,
-    color: COLORS.text.secondary,
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  webUnlockBtn: {
-    backgroundColor: COLORS.accent.green,
-    borderRadius: SIZES.radius.md,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  webUnlockText: { fontFamily: FONTS.bold, fontSize: 15, color: COLORS.background },
+  webBrowser: { fontFamily: FONTS.medium, fontSize: 14, color: COLORS.accent.green },
 });
