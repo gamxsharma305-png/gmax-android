@@ -18,9 +18,26 @@ providers.register(youtubeResolver, true);
 const OFFLINE_TTL = 4 * 60 * 60 * 1000;
 const nativeYt = new NativeStreamSource();
 
+/** Public Invidious instances for offline YouTube audio fallback */
+const DEFAULT_INVIDIOUS = [
+  'https://inv.nadeko.net',
+  'https://invidious.fdn.fr',
+  'https://yewtu.be',
+  'https://vid.puffyan.us',
+];
+
+function ensureYtEndpoints(): void {
+  if (endpointSource.getEndpoints().length === 0) {
+    endpointSource.setEndpoints(
+      DEFAULT_INVIDIOUS.map((url) => ({ url, kind: 'invidious' as const }))
+    );
+  }
+}
+
 class MusicServiceImpl {
   async init(): Promise<void> {
     await metadataCache.hydrate();
+    ensureYtEndpoints();
   }
 
   async search(
@@ -170,7 +187,7 @@ class MusicServiceImpl {
   /**
    * Offline = YouTube only (Musify / youtube_explode pattern).
    * NewPipe progressive audio → same video id.
-   * Fallback: Invidious/Piped endpoints only.
+   * Fallback: Invidious endpoints only.
    * NEVER TitleMatch / Saavn / Audius swap.
    */
   async resolveStreamForOffline(track: Track, signal?: AbortSignal): Promise<ResolvedStream> {
@@ -182,10 +199,12 @@ class MusicServiceImpl {
       };
     }
 
+    ensureYtEndpoints();
+
     const ytTrack = await this.resolveYouTubeTrackForOffline(track, signal);
     if (signal?.aborted) throw appError('timeout');
 
-    // 1) NewPipe (same as Musify engine family — progressive audio of THIS video)
+    // 1) NewPipe — progressive HTTP audio of THIS YouTube video (Musify-style)
     if (nativeYt.canHandle(ytTrack)) {
       try {
         const native = await nativeYt.resolve(ytTrack, signal);
@@ -195,7 +214,7 @@ class MusicServiceImpl {
       }
     }
 
-    // 2) Invidious / Piped — still same YouTube sourceId
+    // 2) Invidious adaptive audio — same sourceId only
     if (endpointSource.canHandle(ytTrack)) {
       try {
         return await endpointSource.resolve(ytTrack, signal);
