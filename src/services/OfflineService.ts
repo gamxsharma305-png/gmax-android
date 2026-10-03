@@ -1,7 +1,11 @@
 /**
- * Offline audio — YouTube only.
- * Primary: native NoteNative.downloadYouTubeAudio (Musify-style full stream).
- * Fallback: JS download of progressive URL (often incomplete on YT).
+ * Offline audio — YouTube only (Musify-style).
+ *
+ * Primary: native NoteNative.downloadYouTubeAudio
+ *   → NewPipe audio streams → full byte pipe to file
+ * Fallback: JS progressive download with Content-Length checks
+ *
+ * localUri is always a file:// URI that expo-audio can play offline.
  */
 import { Platform } from 'react-native';
 import { Track } from '../core/types';
@@ -11,7 +15,19 @@ import {
   isNoteNativeAvailable,
 } from '../../modules/note-native';
 
-type ProgressCb = (p: { written: number; total: number }) => void;
+export type ProgressCb = (p: {
+  written: number;
+  total: number;
+  /** 0–1 when total known */
+  ratio?: number;
+}) => void;
+
+export type DownloadResult = {
+  localUri: string;
+  alreadyHad: boolean;
+  youtubeId?: string;
+  bytes?: number;
+};
 
 type FSModule = {
   documentDirectory: string | null;
@@ -36,6 +52,7 @@ type FSModule = {
     >;
   };
   deleteAsync: (uri: string, opts?: { idempotent?: boolean }) => Promise<void>;
+  moveAsync?: (opts: { from: string; to: string }) => Promise<void>;
 };
 
 let FileSystem: FSModule | null = null;
@@ -51,6 +68,19 @@ try {
   }
 }
 
+const YT_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+
+/** ~96 kbps × seconds × 0.55 — rejects 20–30s stub files */
+function minBytesFor(track: Track, bitrateKbps = 96): number {
+  const dur = Number(track.duration) || 0;
+  if (dur > 0) {
+    const expected = Math.floor(bitrateKbps * 125 * dur * 0.55);
+    return Math.max(120_000, expected);
+  }
+  return 1_000_000;
+}
+
 function offlineDir(): string {
   const base = FileSystem?.documentDirectory;
   if (!base) throw new Error('File system unavailable');
@@ -61,16 +91,21 @@ function safeName(trackId: string): string {
   return trackId.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120);
 }
 
-function minBytesFor(track: Track): number {
-  const dur = Number(track.duration) || 0;
-  if (dur > 0) return Math.max(40_000, Math.floor(dur * 4_000));
-  return 40_000;
-}
-
-/** file:///path or path → absolute path without scheme */
 function toAbsolutePath(fileUri: string): string {
   if (fileUri.startsWith('file://')) return fileUri.replace(/^file:\/\//, '');
   return fileUri;
+}
+
+function toFileUri(pathOrUri: string): string {
+  if (pathOrUri.startsWith('file://')) return pathOrUri;
+  return `file://${pathOrUri.startsWith('/') ? pathOrUri : `/${pathOrUri}`}`;
+}
+
+function extForMime(mime?: string | null): string {
+  const m = (mime || '').toLowerCase();
+  if (m.includes('webm') || m.includes('opus')) return 'webm';
+  if (m.includes('mpeg') || m.includes('mp3')) return 'mp3';
+  return 'm4a';
 }
 
 async function ensureDir(): Promise<void> {
@@ -82,14 +117,156 @@ async function ensureDir(): Promise<void> {
   }
 }
 
-export type DownloadResult = {
-  localUri: string;
-  alreadyHad: boolean;
-  youtubeId?: string;
-};
+async function fileSize(uri: string): Promise<number> {
+  if (!FileSystem) return 0;
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    if (!info.exists) return 0;
+    return info.size ?? 0;
+  } catch {
+    return 0;
+  }
+}
 
-const YT_UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+async function deleteQuiet(uri: string): Promise<void> {
+  if (!FileSystem) return;
+  try {
+    await FileSystem.deleteAsync(uri, { idempotent: true });
+  } catch {
+    /* ok */
+  }
+}
+
+/**
+ * One-track full YouTube offline download (Musify makeSongOffline equivalent).
+ */
+export async function downloadTrackAudio(
+  track: Track,
+  signal?: AbortSignal,
+  onProgress?: ProgressCb
+): Promise<DownloadResult> {
+  if (!FileSystem) {
+    throw new Error('Offline download needs a rebuild with expo-file-system');
+  }
+
+  await ensureDir();
+  const dir = offlineDir();
+  const baseName = safeName(track.id);
+  let path = `${dir}${baseName}.m4a`;
+  const minBytes = minBytesFor(track);
+
+  for (const ext of ['m4a', 'webm', 'mp3', 'mp4']) {
+    const candidate = `${dir}${baseName}.${ext}`;
+    const size = await fileSize(candidate);
+    if (size >= minBytes) {
+      onProgress?.({ written: size, total: size, ratio: 1 });
+      return { localUri: toFileUri(candidate), alreadyHad: true, bytes: size };
+    }
+  }
+  if (track.localUri) {
+    const size = await fileSize(track.localUri);
+    if (size >= minBytes) {
+      return { localUri: toFileUri(track.localUri), alreadyHad: true, bytes: size };
+    }
+  }
+
+  if (signal?.aborted) throw new Error('Download cancelled');
+
+  const ytTrack = await MusicService.resolveYouTubeTrackForOffline(track, signal);
+  const videoId = ytTrack.sourceId;
+  if (!videoId) throw new Error('No YouTube video id for this track');
+
+  if (Platform.OS === 'android' && isNoteNativeAvailable()) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (signal?.aborted) throw new Error('Download cancelled');
+      try {
+        await deleteQuiet(path);
+        const abs = toAbsolutePath(path);
+        const result = await nativeDownloadYouTubeAudio(videoId, abs);
+
+        if (result.ok) {
+          let finalPath = path;
+          const mime = result.mimeType as string | undefined;
+          const wantExt = extForMime(mime);
+          if (!finalPath.endsWith(`.${wantExt}`)) {
+            const renamed = `${dir}${baseName}.${wantExt}`;
+            try {
+              if (FileSystem.moveAsync) {
+                await FileSystem.moveAsync({ from: path, to: renamed });
+                const movedSize = await fileSize(renamed);
+                if (movedSize > 0) finalPath = renamed;
+              }
+            } catch {
+              /* keep path */
+            }
+          }
+
+          const size = (await fileSize(finalPath)) || Number(result.bytes) || 0;
+          if (size >= minBytes || size >= 200_000) {
+            onProgress?.({ written: size, total: size, ratio: 1 });
+            return {
+              localUri: toFileUri(finalPath),
+              alreadyHad: false,
+              youtubeId: videoId,
+              bytes: size,
+            };
+          }
+          await deleteQuiet(finalPath);
+          if (__DEV__) {
+            console.warn('[Offline] native file too small', size, 'need', minBytes);
+          }
+        } else if (__DEV__) {
+          console.warn('[Offline] native fail', result.reason, result.message);
+        }
+      } catch (e) {
+        if (__DEV__) console.warn('[Offline] native error', e);
+      }
+      await new Promise((r) => setTimeout(r, 400 + attempt * 300));
+    }
+  }
+
+  if (signal?.aborted) throw new Error('Download cancelled');
+
+  let lastErr: Error | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (signal?.aborted) throw new Error('Download cancelled');
+    try {
+      const stream = await MusicService.resolveStreamForOffline(ytTrack, signal);
+      const doc = FileSystem.documentDirectory ?? '';
+      if (
+        stream.url.startsWith('file://') ||
+        (doc && stream.url.startsWith(doc))
+      ) {
+        return { localUri: toFileUri(stream.url), alreadyHad: true };
+      }
+
+      const headers: Record<string, string> = {
+        'User-Agent': stream.headers?.['User-Agent'] || YT_UA,
+        Accept: '*/*',
+        'Accept-Encoding': 'identity',
+        Connection: 'keep-alive',
+        Referer: 'https://www.youtube.com/',
+        ...(stream.headers || {}),
+      };
+
+      await deleteQuiet(path);
+      await downloadUrlToPath(stream.url, path, headers, minBytes, onProgress);
+
+      const size = await fileSize(path);
+      return {
+        localUri: toFileUri(path),
+        alreadyHad: false,
+        youtubeId: videoId,
+        bytes: size,
+      };
+    } catch (e) {
+      lastErr = e instanceof Error ? e : new Error(String(e));
+      await new Promise((r) => setTimeout(r, 500 + attempt * 400));
+    }
+  }
+
+  throw lastErr ?? new Error('YouTube download failed');
+}
 
 async function downloadUrlToPath(
   url: string,
@@ -100,12 +277,6 @@ async function downloadUrlToPath(
 ): Promise<void> {
   if (!FileSystem) throw new Error('File system unavailable');
 
-  try {
-    await FileSystem.deleteAsync(path, { idempotent: true });
-  } catch {
-    /* ok */
-  }
-
   let status = 0;
   let respHeaders: Record<string, string> = {};
 
@@ -115,9 +286,11 @@ async function downloadUrlToPath(
       path,
       { headers },
       (p) => {
+        const total = p.totalBytesExpectedToWrite || 0;
         onProgress?.({
           written: p.totalBytesWritten,
-          total: p.totalBytesExpectedToWrite,
+          total,
+          ratio: total > 0 ? p.totalBytesWritten / total : undefined,
         });
       }
     );
@@ -132,171 +305,92 @@ async function downloadUrlToPath(
   }
 
   if (status < 200 || status >= 300) {
-    try {
-      await FileSystem.deleteAsync(path, { idempotent: true });
-    } catch {
-      /* ok */
-    }
+    await deleteQuiet(path);
     throw new Error(`Download failed (${status})`);
   }
 
-  const info = await FileSystem.getInfoAsync(path);
-  const size = info.size ?? 0;
-
+  const size = await fileSize(path);
   const clRaw =
     respHeaders['Content-Length'] || respHeaders['content-length'] || '';
   const contentLength = Number(clRaw);
 
-  if (Number.isFinite(contentLength) && contentLength > 10_000) {
-    if (size < contentLength * 0.98) {
-      try {
-        await FileSystem.deleteAsync(path, { idempotent: true });
-      } catch {
-        /* ok */
-      }
-      throw new Error(`Incomplete (${size}/${contentLength}) — retry`);
+  if (Number.isFinite(contentLength) && contentLength > 50_000) {
+    if (size < contentLength * 0.97) {
+      await deleteQuiet(path);
+      throw new Error(`Incomplete (${size}/${contentLength})`);
     }
-  } else if (!info.exists || size < minBytes) {
-    try {
-      await FileSystem.deleteAsync(path, { idempotent: true });
-    } catch {
-      /* ok */
-    }
-    throw new Error('Incomplete download — file too small');
+  } else if (size < minBytes) {
+    await deleteQuiet(path);
+    throw new Error(`Incomplete — file too small (${size} < ${minBytes})`);
   }
 }
 
-/**
- * One-click full YouTube offline download.
- * 1) Native Kotlin stream-to-file (complete)
- * 2) JS fallback only if native missing
- */
-export async function downloadTrackAudio(
-  track: Track,
-  signal?: AbortSignal,
-  onProgress?: ProgressCb
-): Promise<DownloadResult> {
-  if (!FileSystem) {
-    throw new Error('Offline download needs a rebuild with expo-file-system');
-  }
+/** Musify-style concurrent playlist offline (max 3 workers). */
+export async function downloadTracksBatch(
+  tracks: Track[],
+  options: {
+    concurrency?: number;
+    signal?: AbortSignal;
+    onTrackProgress?: (
+      index: number,
+      track: Track,
+      state: 'start' | 'done' | 'skip' | 'fail',
+      detail?: string
+    ) => void;
+    onOverall?: (done: number, failed: number, total: number) => void;
+  } = {}
+): Promise<{ completed: number; failed: number; results: DownloadResult[] }> {
+  const concurrency = Math.max(1, Math.min(options.concurrency ?? 3, 3));
+  const list = tracks.filter(Boolean);
+  let done = 0;
+  let failed = 0;
+  const results: DownloadResult[] = [];
+  let cursor = 0;
 
-  await ensureDir();
-  const dir = offlineDir();
-  const path = `${dir}${safeName(track.id)}.m4a`;
-  const minBytes = minBytesFor(track);
-
-  const existing = await FileSystem.getInfoAsync(path);
-  if (existing.exists && (existing.size ?? 0) >= minBytes) {
-    return { localUri: path, alreadyHad: true };
-  }
-
-  if (track.localUri) {
-    const t = await FileSystem.getInfoAsync(track.localUri);
-    if (t.exists && (t.size ?? 0) >= minBytes) {
-      return { localUri: track.localUri, alreadyHad: true };
-    }
-  }
-
-  if (signal?.aborted) throw new Error('Download cancelled');
-
-  // Resolve YouTube video id (same song, not Saavn)
-  const ytTrack = await MusicService.resolveYouTubeTrackForOffline(track, signal);
-  const videoId = ytTrack.sourceId;
-  if (!videoId) {
-    throw new Error('No YouTube video id for this track');
-  }
-
-  // ——— Native full download (Musify pattern) ———
-  if (Platform.OS === 'android' && isNoteNativeAvailable()) {
-    try {
-      // Wipe partial
+  const worker = async () => {
+    while (cursor < list.length) {
+      if (options.signal?.aborted) break;
+      const index = cursor++;
+      const track = list[index];
+      options.onTrackProgress?.(index, track, 'start');
       try {
-        await FileSystem.deleteAsync(path, { idempotent: true });
-      } catch {
-        /* ok */
+        const r = await downloadTrackAudio(track, options.signal);
+        results[index] = r;
+        done++;
+        options.onTrackProgress?.(index, track, r.alreadyHad ? 'skip' : 'done');
+      } catch (e) {
+        failed++;
+        options.onTrackProgress?.(
+          index,
+          track,
+          'fail',
+          e instanceof Error ? e.message : String(e)
+        );
       }
-
-      const abs = toAbsolutePath(path);
-      const result = await nativeDownloadYouTubeAudio(videoId, abs);
-
-      if (result.ok) {
-        const info = await FileSystem.getInfoAsync(path);
-        const size = info.size ?? result.bytes ?? 0;
-        if (size >= minBytes || size >= 40_000) {
-          onProgress?.({ written: size, total: size });
-          return {
-            localUri: path.startsWith('file://') ? path : `file://${abs}`,
-            alreadyHad: false,
-            youtubeId: videoId,
-          };
-        }
-        throw new Error(`Native file too small (${size})`);
-      }
-
-      if (__DEV__) {
-        console.warn('[Offline] native download failed:', result.reason, result.message);
-      }
-    } catch (e) {
-      if (__DEV__) {
-        console.warn('[Offline] native download error:', e);
-      }
-      // fall through to JS path
+      options.onOverall?.(done, failed, list.length);
     }
-  }
+  };
 
-  if (signal?.aborted) throw new Error('Download cancelled');
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, list.length) }, () => worker())
+  );
 
-  // ——— JS fallback (less reliable on YouTube) ———
-  let lastErr: Error | null = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (signal?.aborted) throw new Error('Download cancelled');
-    try {
-      const stream = await MusicService.resolveStreamForOffline(ytTrack, signal);
-      const doc = FileSystem.documentDirectory ?? '';
-      if (stream.url.startsWith('file://') || (doc && stream.url.startsWith(doc))) {
-        return { localUri: stream.url, alreadyHad: true };
-      }
-
-      const headers: Record<string, string> = {
-        'User-Agent': stream.headers?.['User-Agent'] || YT_UA,
-        Accept: '*/*',
-        'Accept-Encoding': 'identity',
-        Connection: 'keep-alive',
-        ...(stream.headers || {}),
-      };
-
-      await downloadUrlToPath(stream.url, path, headers, minBytes, onProgress);
-      return {
-        localUri: path,
-        alreadyHad: false,
-        youtubeId: videoId,
-      };
-    } catch (e) {
-      lastErr = e instanceof Error ? e : new Error(String(e));
-      await new Promise((r) => setTimeout(r, 500 + attempt * 400));
-    }
-  }
-
-  throw lastErr ?? new Error('YouTube download failed');
+  return { completed: done, failed, results };
 }
 
 export async function localFileExists(uri?: string | null): Promise<boolean> {
   if (!uri || !FileSystem) return false;
   try {
-    const info = await FileSystem.getInfoAsync(uri);
-    return !!info.exists && (info.size ?? 0) > 40_000;
+    const size = await fileSize(uri);
+    return size >= 120_000;
   } catch {
     return false;
   }
 }
 
 export async function removeOfflineFile(uri?: string | null): Promise<void> {
-  if (!uri || !FileSystem) return;
-  try {
-    await FileSystem.deleteAsync(uri, { idempotent: true });
-  } catch {
-    /* ok */
-  }
+  if (!uri) return;
+  await deleteQuiet(uri);
 }
 
 export function isOfflineSupported(): boolean {
