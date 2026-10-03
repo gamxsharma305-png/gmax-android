@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronLeft, Crown } from 'lucide-react-native';
+import { ChevronLeft, Crown, Upload } from 'lucide-react-native';
 import Constants from 'expo-constants';
 import { useNavigation } from '@react-navigation/native';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
@@ -154,6 +154,22 @@ export default function SettingsScreen() {
             <Stat value={playlists.length} label="Playlists" />
             <Stat value={history.length} label="Listens" />
           </View>
+        </View>
+
+        <Text style={styles.sectionLabel}>LIBRARY TOOLS</Text>
+        <View style={styles.card}>
+          <TouchableOpacity
+            style={styles.actionRow}
+            onPress={() => navigation.navigate('ImportSpotify' as never)}
+            activeOpacity={0.85}
+          >
+            <Upload color={COLORS.accent.green} size={20} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Import playlist from Spotify</Text>
+              <Text style={styles.rowHint}>CSV via Chosic → YouTube → My Playlist</Text>
+            </View>
+            <Text style={styles.premiumCta}>Open</Text>
+          </TouchableOpacity>
         </View>
 
         <Text style={styles.sectionLabel}>PREFERENCES</Text>
@@ -465,6 +481,12 @@ const styles = StyleSheet.create({
   rowHint: { fontFamily: FONTS.regular, fontSize: 12, color: COLORS.text.muted, marginTop: 2 },
   rowValue: { fontFamily: FONTS.medium, fontSize: 15, color: COLORS.text.primary },
   divider: { height: 1, backgroundColor: COLORS.glassBorder },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: SIZES.sm + 2,
+  },
   footer: {
     fontFamily: FONTS.medium,
     fontSize: 12,
