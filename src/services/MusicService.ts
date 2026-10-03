@@ -9,7 +9,8 @@ import {
 } from '../core/types';
 import { PlaylistPage, providers } from '../providers/TrackResolver';
 import { youtubeResolver } from '../providers/youtube/YouTubeResolver';
-import { streamResolver, NativeStreamSource } from '../providers/stream/StreamResolver';
+import { streamResolver } from '../providers/stream/StreamResolver';
+import { NativeStreamSource } from '../providers/stream/NativeStreamSource';
 import { multiSourceSearch } from '../providers/MultiSourceSearch';
 
 providers.register(youtubeResolver, true);
@@ -195,8 +196,14 @@ class MusicServiceImpl {
       }
     }
 
-    // Invidious/Piped / rest of chain — still YouTube sourceId, no TitleMatch
-    return streamResolver.resolve(ytTrack, signal);
+    // Invidious/Piped / rest of chain — still YouTube sourceId, no TitleMatch for offline
+    // Force YouTube path: clear audioUrl so DirectStreamSource (Saavn) is skipped
+    const pureYt: Track = {
+      ...ytTrack,
+      audioUrl: undefined,
+      provider: 'youtube',
+    };
+    return streamResolver.resolve(pureYt, signal);
   }
 
   canPlay(track: Track): boolean {
