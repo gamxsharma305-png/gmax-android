@@ -43,3 +43,18 @@ export type NativeStreamFailure = {
 };
 
 export type NativeStreamResult = NativeStreamSuccess | NativeStreamFailure;
+
+export type NativeDownloadSuccess = {
+  ok: true;
+  path: string;
+  uri: string;
+  bytes: number;
+  mimeType?: string;
+  bitrate?: number;
+  durationSeconds?: number;
+  title?: string;
+  uploader?: string;
+  extractor?: string;
+};
+
+export type NativeDownloadResult = NativeDownloadSuccess | NativeStreamFailure;
