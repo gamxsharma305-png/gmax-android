@@ -9,7 +9,7 @@ import {
 } from '../core/types';
 import { PlaylistPage, providers } from '../providers/TrackResolver';
 import { youtubeResolver } from '../providers/youtube/YouTubeResolver';
-import { streamResolver } from '../providers/stream/StreamResolver';
+import { streamResolver, endpointSource } from '../providers/stream/StreamResolver';
 import { NativeStreamSource } from '../providers/stream/NativeStreamSource';
 import { multiSourceSearch } from '../providers/MultiSourceSearch';
 
@@ -144,9 +144,8 @@ class MusicServiceImpl {
   }
 
   /**
-   * Ensure we have a YouTube video id for offline download.
-   * If track is already YouTube → use it.
-   * Else search YouTube for "title artist" and take best match.
+   * Ensure YouTube video id for offline.
+   * Same track if already YouTube; else search YouTube for title+artist.
    */
   async resolveYouTubeTrackForOffline(
     track: Track,
@@ -169,10 +168,10 @@ class MusicServiceImpl {
   }
 
   /**
-   * Offline download stream — YouTube only (Musify / youtube_explode style).
-   * 1) NewPipe progressive audio (same video)
-   * 2) Stream chain without Saavn title-match
-   * Never swaps to a different Saavn/Audius song.
+   * Offline = YouTube only (Musify / youtube_explode pattern).
+   * NewPipe progressive audio → same video id.
+   * Fallback: Invidious/Piped endpoints only.
+   * NEVER TitleMatch / Saavn / Audius swap.
    */
   async resolveStreamForOffline(track: Track, signal?: AbortSignal): Promise<ResolvedStream> {
     if (track.localUri) {
@@ -186,24 +185,29 @@ class MusicServiceImpl {
     const ytTrack = await this.resolveYouTubeTrackForOffline(track, signal);
     if (signal?.aborted) throw appError('timeout');
 
-    // NewPipe progressive audio — full file, same video id (Musify pattern)
+    // 1) NewPipe (same as Musify engine family — progressive audio of THIS video)
     if (nativeYt.canHandle(ytTrack)) {
       try {
         const native = await nativeYt.resolve(ytTrack, signal);
         if (native?.url) return native;
       } catch {
-        /* fall through to endpoints */
+        /* fall through */
       }
     }
 
-    // Invidious/Piped / rest of chain — still YouTube sourceId, no TitleMatch for offline
-    // Force YouTube path: clear audioUrl so DirectStreamSource (Saavn) is skipped
-    const pureYt: Track = {
-      ...ytTrack,
-      audioUrl: undefined,
-      provider: 'youtube',
-    };
-    return streamResolver.resolve(pureYt, signal);
+    // 2) Invidious / Piped — still same YouTube sourceId
+    if (endpointSource.canHandle(ytTrack)) {
+      try {
+        return await endpointSource.resolve(ytTrack, signal);
+      } catch {
+        /* fall through */
+      }
+    }
+
+    throw appError(
+      'source_unavailable',
+      'YouTube audio stream not available for offline download'
+    );
   }
 
   canPlay(track: Track): boolean {
