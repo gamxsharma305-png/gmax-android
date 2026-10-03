@@ -66,7 +66,7 @@ module.exports = {
   name: "GMAX",
   slug: "gmax",
   owner: "gmax519",
-  version: "1.1.6",
+  version: "1.1.7",
   orientation: "portrait",
   userInterfaceStyle: "dark",
   icon: "./assets/icon.png",
@@ -78,7 +78,7 @@ module.exports = {
   },
   android: {
     package: "com.gmax.player",
-    versionCode: 31,
+    versionCode: 32,
     backgroundColor: "#050707",
     adaptiveIcon: {
       foregroundImage: "./assets/icon.png",
@@ -91,10 +91,12 @@ module.exports = {
       "FOREGROUND_SERVICE",
       "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
       "POST_NOTIFICATIONS",
+      "REQUEST_INSTALL_PACKAGES",
       "android.permission.MODIFY_AUDIO_SETTINGS",
       "android.permission.FOREGROUND_SERVICE",
       "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
       "android.permission.POST_NOTIFICATIONS",
+      "android.permission.REQUEST_INSTALL_PACKAGES",
     ],
   },
   plugins: [
