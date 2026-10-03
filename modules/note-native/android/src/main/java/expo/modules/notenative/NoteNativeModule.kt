@@ -30,9 +30,12 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Native YouTube audio via NewPipeExtractor.
- * resolveYouTubeStream → progressive HTTP URL for playback.
- * downloadYouTubeAudio → full byte stream to disk (Musify-style).
+ * Native YouTube via NewPipeExtractor.
+ *
+ * Online play: progressive HTTP only (expo-audio).
+ * Offline download (Musify pattern):
+ *   getManifest → audioOnly.withHighestBitrate() → pipe full stream to .m4a
+ * Adaptive audio-only is OK offline — local m4a plays fine.
  */
 class NoteNativeModule : Module() {
 
@@ -43,8 +46,8 @@ class NoteNativeModule : Module() {
     var initialized = false
 
     const val DOWNLOAD_CONNECT_MS = 30_000
-    const val DOWNLOAD_READ_MS = 180_000 // long songs
-    const val BUFFER = 64 * 1024
+    const val DOWNLOAD_READ_MS = 300_000 // up to 5 min for long tracks
+    const val BUFFER = 128 * 1024
   }
 
   override fun definition() = ModuleDefinition {
@@ -63,10 +66,6 @@ class NoteNativeModule : Module() {
       resolveYouTubeStream(videoId)
     }
 
-    /**
-     * Resolve + download FULL progressive audio to destPath.
-     * destPath is absolute filesystem path (no file://).
-     */
     AsyncFunction("downloadYouTubeAudio") { videoId: String, destPath: String ->
       downloadYouTubeAudio(videoId, destPath)
     }
@@ -107,6 +106,7 @@ class NoteNativeModule : Module() {
         else -> Unit
       }
 
+      // Streaming playback still needs progressive HTTP for expo-audio
       val best = bestProgressiveAudio(info.audioStreams)
         ?: return failure(
           "no_audio_stream",
@@ -130,6 +130,11 @@ class NoteNativeModule : Module() {
     }
   }
 
+  /**
+   * Musify offline flow:
+   * streamsClient.getManifest → audioOnly highest bitrate → pipe to file.
+   * Tries progressive first, then adaptive audio-only (itag 140-style m4a).
+   */
   private fun downloadYouTubeAudio(videoId: String, destPath: String): Map<String, Any?> {
     val id = videoId.trim()
     if (id.isBlank() || id.length < 6) {
@@ -155,49 +160,56 @@ class NoteNativeModule : Module() {
         else -> Unit
       }
 
-      val best = bestProgressiveAudio(info.audioStreams)
-        ?: return failure("no_audio_stream", "No progressive audio stream")
-
-      val streamUrl = best.content
-      if (streamUrl.isNullOrBlank()) {
-        return failure("no_audio_stream", "Empty stream URL")
+      val candidates = audioDownloadCandidates(info.audioStreams)
+      if (candidates.isEmpty()) {
+        return failure("no_audio_stream", "No downloadable audio stream")
       }
 
       val outFile = File(destPath)
       outFile.parentFile?.mkdirs()
-      if (outFile.exists()) {
-        outFile.delete()
-      }
 
-      val written = streamToFile(streamUrl, outFile)
-      val minExpected =
-        if (info.duration > 0) {
-          // ~32 kbps floor for duration
-          (info.duration * 4000L).coerceAtLeast(40_000L)
-        } else {
-          40_000L
+      var lastError: String? = null
+
+      for (stream in candidates) {
+        val streamUrl = stream.content
+        if (streamUrl.isNullOrBlank()) continue
+
+        try {
+          if (outFile.exists()) outFile.delete()
+
+          val written = streamToFile(streamUrl, outFile)
+          val minExpected = minBytesFor(info.duration, stream.averageBitrate)
+
+          if (written < minExpected) {
+            outFile.delete()
+            lastError = "Incomplete: $written bytes (need >= $minExpected)"
+            continue
+          }
+
+          // Success — same as Musify saving tracks/<ytid>.m4a
+          return mapOf(
+            "ok" to true,
+            "path" to outFile.absolutePath,
+            "uri" to "file://${outFile.absolutePath}",
+            "bytes" to written,
+            "mimeType" to stream.format?.mimeType,
+            "bitrate" to stream.averageBitrate,
+            "durationSeconds" to info.duration,
+            "title" to info.name,
+            "uploader" to info.uploaderName,
+            "delivery" to stream.deliveryMethod.name,
+            "extractor" to "NewPipeExtractor/musify-pipe"
+          )
+        } catch (e: Exception) {
+          lastError = e.message ?: e.javaClass.simpleName
+          try {
+            outFile.delete()
+          } catch (_: Exception) {
+          }
         }
-
-      if (written < minExpected) {
-        outFile.delete()
-        return failure(
-          "network",
-          "Incomplete download: $written bytes (expected >= $minExpected)"
-        )
       }
 
-      mapOf(
-        "ok" to true,
-        "path" to outFile.absolutePath,
-        "uri" to "file://${outFile.absolutePath}",
-        "bytes" to written,
-        "mimeType" to best.format?.mimeType,
-        "bitrate" to best.averageBitrate,
-        "durationSeconds" to info.duration,
-        "title" to info.name,
-        "uploader" to info.uploaderName,
-        "extractor" to "NewPipeExtractor/download"
-      )
+      failure("network", lastError ?: "All audio streams failed to download fully")
     } catch (e: Throwable) {
       try {
         File(destPath).delete()
@@ -208,24 +220,75 @@ class NoteNativeModule : Module() {
   }
 
   /**
-   * Pipe entire progressive body to disk until EOF.
-   * Follows redirects; requires near-full Content-Length when present.
+   * Ordered like Musify audioOnly.sortByBitrate / withHighestBitrate:
+   * 1) Progressive HTTP (highest bitrate first)
+   * 2) Any other audio URL (adaptive m4a etc.), highest bitrate first
+   * Skip HLS (segmented — not a single file).
+   */
+  private fun audioDownloadCandidates(streams: List<AudioStream>?): List<AudioStream> {
+    if (streams.isNullOrEmpty()) return emptyList()
+
+    val usable =
+      streams.filter {
+        it.isUrl &&
+          !it.content.isNullOrBlank() &&
+          it.deliveryMethod != DeliveryMethod.HLS &&
+          it.deliveryMethod != DeliveryMethod.TORRENT
+      }
+
+    val progressive =
+      usable
+        .filter { it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP }
+        .sortedByDescending { it.averageBitrate }
+
+    val adaptive =
+      usable
+        .filter { it.deliveryMethod != DeliveryMethod.PROGRESSIVE_HTTP }
+        .sortedByDescending { it.averageBitrate }
+
+    // Prefer progressive for simpler files; then adaptive audio-only (Musify default)
+    return progressive + adaptive
+  }
+
+  private fun minBytesFor(durationSec: Long, bitrate: Int): Long {
+    // bitrate is often averageBitrate in bps or kbps depending on extractor — use soft floor
+    val dur = if (durationSec > 0) durationSec else 120L
+    val fromBitrate =
+      if (bitrate > 1000) {
+        // assume bits/sec
+        (dur * bitrate) / 8
+      } else if (bitrate > 0) {
+        // assume kbps
+        dur * bitrate * 125L
+      } else {
+        0L
+      }
+    // ~48 kbps floor × duration, at least 80 KB
+    val floor = (dur * 6_000L).coerceAtLeast(80_000L)
+    return maxOf(floor, (fromBitrate * 0.7).toLong())
+  }
+
+  /**
+   * Full body pipe until EOF — Musify's stream.pipe(fileStream).
    */
   @Throws(IOException::class)
   private fun streamToFile(streamUrl: String, outFile: File): Long {
     var currentUrl = streamUrl
     var redirects = 0
 
-    while (redirects < 8) {
+    while (redirects < 10) {
       val connection = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
         requestMethod = "GET"
         connectTimeout = DOWNLOAD_CONNECT_MS
         readTimeout = DOWNLOAD_READ_MS
-        instanceFollowRedirects = false // handle manually for googlevideo
+        instanceFollowRedirects = false
         setRequestProperty("User-Agent", NoteNativeDownloader.USER_AGENT)
         setRequestProperty("Accept", "*/*")
         setRequestProperty("Accept-Encoding", "identity")
         setRequestProperty("Connection", "keep-alive")
+        // Some googlevideo nodes need a referer
+        setRequestProperty("Referer", "https://www.youtube.com/")
+        setRequestProperty("Origin", "https://www.youtube.com")
       }
 
       try {
@@ -239,6 +302,10 @@ class NoteNativeModule : Module() {
           redirects++
           connection.disconnect()
           continue
+        }
+
+        if (code == 403 || code == 401) {
+          throw IOException("HTTP $code — stream URL expired or blocked")
         }
 
         if (code !in 200..299) {
@@ -260,11 +327,20 @@ class NoteNativeModule : Module() {
           }
           fos.flush()
         }
-        input.close()
+        try {
+          input.close()
+        } catch (_: Exception) {
+        }
 
-        if (expected > 10_000 && written < (expected * 0.98).toLong()) {
+        // Musify completes when pipe finishes; also verify Content-Length if present
+        if (expected > 10_000L && written < (expected * 0.97).toLong()) {
           outFile.delete()
           throw IOException("Incomplete body: $written / $expected bytes")
+        }
+
+        if (written < 20_000L) {
+          outFile.delete()
+          throw IOException("File too small: $written bytes")
         }
 
         return written
@@ -279,7 +355,6 @@ class NoteNativeModule : Module() {
     throw IOException("Too many redirects")
   }
 
-  /** expo-audio needs progressive HTTP — not DASH/HLS. */
   private fun bestProgressiveAudio(streams: List<AudioStream>?): AudioStream? =
     streams
       ?.filter { it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP }
