@@ -1,6 +1,7 @@
 /**
  * Self-hosted in-app updates (sideload APK).
- * Host update.json + APK URL; app checks on launch and shows popup.
+ * Download APK, verify size, open system installer.
+ * On parse failure → open browser (most reliable on MIUI/realme).
  */
 import { Linking, Platform } from 'react-native';
 import Constants from 'expo-constants';
@@ -13,9 +14,11 @@ export type UpdateInfo = {
   notes?: string;
 };
 
-/** Raw GitHub JSON — update this file when you release a new APK */
 const UPDATE_MANIFEST_URL =
   'https://raw.githubusercontent.com/gamxsharma305-png/gmax-android/main/update.json';
+
+/** Reject tiny/corrupt files (real GMAX APK is ~80–120 MB) */
+const MIN_APK_BYTES = 20 * 1024 * 1024;
 
 type FSModule = {
   cacheDirectory: string | null;
@@ -96,36 +99,52 @@ export type DownloadProgress = {
 };
 
 /**
- * Download APK then open Android package installer.
- * User must allow "Install unknown apps" for GMAX once.
+ * Reliable path for most Android OEMs:
+ * open the APK URL in the system browser / download manager.
+ * Avoids "problem parsing the package" from broken content:// installs.
+ */
+export async function openApkInBrowser(apkUrl: string): Promise<void> {
+  await Linking.openURL(apkUrl);
+}
+
+/**
+ * Download APK to cache, verify size, try installer; else browser.
  */
 export async function downloadAndInstallApk(
   apkUrl: string,
   onProgress?: (p: DownloadProgress) => void
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; usedBrowser?: boolean }> {
   if (Platform.OS !== 'android') {
     await Linking.openURL(apkUrl);
-    return { ok: true };
+    return { ok: true, usedBrowser: true };
   }
 
-  if (!FileSystem?.cacheDirectory) {
-    await Linking.openURL(apkUrl);
-    return { ok: true };
-  }
-
-  const dest = `${FileSystem.cacheDirectory}gmax-update.apk`;
+  // Primary reliable path for MIUI / realme / Oppo: system download
+  // (in-app content:// install often shows "problem parsing the package")
   try {
-    await FileSystem.deleteAsync(dest, { idempotent: true });
-  } catch {
-    /* ok */
-  }
+    if (!FileSystem?.cacheDirectory) {
+      await Linking.openURL(apkUrl);
+      return { ok: true, usedBrowser: true };
+    }
 
-  try {
+    const dest = `${FileSystem.cacheDirectory}gmax-update.apk`;
+    try {
+      await FileSystem.deleteAsync(dest, { idempotent: true });
+    } catch {
+      /* ok */
+    }
+
+    let downloaded = false;
+
     if (FileSystem.createDownloadResumable) {
       const task = FileSystem.createDownloadResumable(
         apkUrl,
         dest,
-        {},
+        {
+          headers: {
+            Accept: 'application/vnd.android.package-archive,*/*',
+          },
+        },
         (p) => {
           const total = p.totalBytesExpectedToWrite || 1;
           const written = p.totalBytesWritten || 0;
@@ -137,45 +156,57 @@ export async function downloadAndInstallApk(
         }
       );
       const result = await task.downloadAsync();
-      if (!result?.uri) {
-        await Linking.openURL(apkUrl);
-        return { ok: true };
-      }
+      downloaded = !!result?.uri;
     } else {
-      const result = await FileSystem.downloadAsync(apkUrl, dest);
-      if (result.status < 200 || result.status >= 300) {
-        await Linking.openURL(apkUrl);
-        return { ok: true };
-      }
+      const result = await FileSystem.downloadAsync(apkUrl, dest, {
+        headers: { Accept: 'application/vnd.android.package-archive,*/*' },
+      });
+      downloaded = result.status >= 200 && result.status < 300;
       onProgress?.({ percent: 100, written: 1, total: 1 });
     }
 
-    // Open system installer via content:// URI
-    if (FileSystem.getContentUriAsync) {
-      try {
-        const contentUri = await FileSystem.getContentUriAsync(dest);
-        // Intent via Linking (works on many devices)
-        const can = await Linking.canOpenURL(contentUri);
-        if (can) {
+    if (downloaded) {
+      const info = await FileSystem.getInfoAsync(dest);
+      const size = info.size ?? 0;
+
+      // Corrupt / HTML error page / truncated
+      if (!info.exists || size < MIN_APK_BYTES) {
+        try {
+          await FileSystem.deleteAsync(dest, { idempotent: true });
+        } catch {
+          /* ok */
+        }
+        await Linking.openURL(apkUrl);
+        return {
+          ok: true,
+          usedBrowser: true,
+          error:
+            'Downloaded file too small — opened browser. Install from Downloads.',
+        };
+      }
+
+      // Try content URI install
+      if (FileSystem.getContentUriAsync) {
+        try {
+          const contentUri = await FileSystem.getContentUriAsync(dest);
           await Linking.openURL(contentUri);
           return { ok: true };
+        } catch {
+          /* fall through to browser */
         }
-      } catch {
-        /* fall through */
       }
     }
 
-    // Fallback: open APK URL in browser
     await Linking.openURL(apkUrl);
-    return { ok: true };
+    return { ok: true, usedBrowser: true };
   } catch (e) {
     try {
       await Linking.openURL(apkUrl);
-      return { ok: true };
+      return { ok: true, usedBrowser: true };
     } catch {
       return {
         ok: false,
-        error: e instanceof Error ? e.message : 'Update download failed',
+        error: e instanceof Error ? e.message : 'Update failed',
       };
     }
   }
