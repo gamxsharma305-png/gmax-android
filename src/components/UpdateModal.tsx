@@ -71,7 +71,7 @@ export function UpdateModal({ visible, remote, localVersion, onClose }: Props) {
           <Text style={styles.badge}>UPDATE</Text>
           <Text style={styles.title}>Please update</Text>
           <Text style={styles.sub}>
-            {`New version ${remote.version} available.\nYou have ${localVersion}.`}
+            New version {remote.version} available.{'\n'}You have {localVersion}.
           </Text>
           {!!remote.notes && <Text style={styles.notes}>{remote.notes}</Text>}
 
