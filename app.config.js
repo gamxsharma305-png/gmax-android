@@ -66,7 +66,7 @@ module.exports = {
   name: "GMAX",
   slug: "gmax",
   owner: "gmax519",
-  version: "1.1.7",
+  version: "1.1.8",
   orientation: "portrait",
   userInterfaceStyle: "dark",
   icon: "./assets/icon.png",
@@ -78,7 +78,7 @@ module.exports = {
   },
   android: {
     package: "com.gmax.player",
-    versionCode: 32,
+    versionCode: 33,
     backgroundColor: "#050707",
     adaptiveIcon: {
       foregroundImage: "./assets/icon.png",
