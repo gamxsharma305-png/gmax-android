@@ -9,14 +9,13 @@ import {
 } from '../core/types';
 import { PlaylistPage, providers } from '../providers/TrackResolver';
 import { youtubeResolver } from '../providers/youtube/YouTubeResolver';
-import { streamResolver } from '../providers/stream/StreamResolver';
-import { TitleMatchStreamSource } from '../providers/stream/TitleMatchStreamSource';
+import { streamResolver, NativeStreamSource } from '../providers/stream/StreamResolver';
 import { multiSourceSearch } from '../providers/MultiSourceSearch';
 
 providers.register(youtubeResolver, true);
 
-const titleMatchSource = new TitleMatchStreamSource();
 const OFFLINE_TTL = 4 * 60 * 60 * 1000;
+const nativeYt = new NativeStreamSource();
 
 class MusicServiceImpl {
   async init(): Promise<void> {
@@ -144,8 +143,35 @@ class MusicServiceImpl {
   }
 
   /**
-   * Offline download stream: prefer complete CDN files (direct / Saavn / Audius)
-   * over YouTube progressive URLs that often truncate mid-file.
+   * Ensure we have a YouTube video id for offline download.
+   * If track is already YouTube → use it.
+   * Else search YouTube for "title artist" and take best match.
+   */
+  async resolveYouTubeTrackForOffline(
+    track: Track,
+    signal?: AbortSignal
+  ): Promise<Track> {
+    if (track.provider === 'youtube' && track.sourceId) {
+      return track;
+    }
+
+    const q = `${track.title} ${track.artist?.name || ''}`.trim();
+    if (!q) throw appError('track_unavailable', 'No title to search on YouTube');
+
+    const yt = await providers.default.search(q, { filter: 'Songs', limit: 8, signal });
+    const hit =
+      yt.tracks.find((t) => t.provider === 'youtube' && t.sourceId) || yt.tracks[0];
+    if (!hit?.sourceId) {
+      throw appError('track_unavailable', 'No YouTube match for this song');
+    }
+    return hit;
+  }
+
+  /**
+   * Offline download stream — YouTube only (Musify / youtube_explode style).
+   * 1) NewPipe progressive audio (same video)
+   * 2) Stream chain without Saavn title-match
+   * Never swaps to a different Saavn/Audius song.
    */
   async resolveStreamForOffline(track: Track, signal?: AbortSignal): Promise<ResolvedStream> {
     if (track.localUri) {
@@ -156,24 +182,21 @@ class MusicServiceImpl {
       };
     }
 
-    if (typeof track.audioUrl === 'string' && /^https?:\/\//.test(track.audioUrl)) {
-      return {
-        url: track.audioUrl,
-        expiresAt: Date.now() + OFFLINE_TTL,
-        resolvedBy: 'direct',
-      };
+    const ytTrack = await this.resolveYouTubeTrackForOffline(track, signal);
+    if (signal?.aborted) throw appError('timeout');
+
+    // NewPipe progressive audio — full file, same video id (Musify pattern)
+    if (nativeYt.canHandle(ytTrack)) {
+      try {
+        const native = await nativeYt.resolve(ytTrack, signal);
+        if (native?.url) return native;
+      } catch {
+        /* fall through to endpoints */
+      }
     }
 
-    // Saavn / Audius title match — full progressive files, usually finishes in a few seconds
-    try {
-      const matched = await titleMatchSource.resolve(track, signal);
-      if (matched?.url) return matched;
-    } catch {
-      /* fall through */
-    }
-
-    // Last resort: normal chain (may be YouTube — slower / can truncate)
-    return streamResolver.resolve(track, signal);
+    // Invidious/Piped / rest of chain — still YouTube sourceId, no TitleMatch
+    return streamResolver.resolve(ytTrack, signal);
   }
 
   canPlay(track: Track): boolean {
