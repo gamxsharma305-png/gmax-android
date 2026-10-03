@@ -12,6 +12,7 @@ import { COLORS, FONTS, SIZES } from '../constants/theme';
 import {
   UpdateInfo,
   downloadAndInstallApk,
+  openApkInBrowser,
 } from '../services/UpdateService';
 
 type Props = {
@@ -26,14 +27,16 @@ export function UpdateModal({ visible, remote, localVersion, onClose }: Props) {
   const [busy, setBusy] = useState(false);
   const [percent, setPercent] = useState(0);
   const [err, setErr] = useState<string | null>(null);
+  const [hint, setHint] = useState<string | null>(null);
 
   const onUpdate = useCallback(async () => {
     if (!remote.apkUrl) {
-      setErr('APK link missing — developer update.json me apkUrl set kare');
+      setErr('APK link missing');
       return;
     }
     setBusy(true);
     setErr(null);
+    setHint(null);
     setPercent(0);
     const result = await downloadAndInstallApk(remote.apkUrl, (p) => setPercent(p.percent));
     setBusy(false);
@@ -41,7 +44,24 @@ export function UpdateModal({ visible, remote, localVersion, onClose }: Props) {
       setErr(result.error || 'Update failed');
       return;
     }
-    // Installer opened — keep modal unless user dismisses
+    if (result.usedBrowser) {
+      setHint(
+        'Browser/Downloads me APK open hua. Install → Allow unknown apps → Install.'
+      );
+    } else {
+      setHint('Install screen open hona chahiye. Agar error aaye to neeche Browser use karo.');
+    }
+  }, [remote.apkUrl]);
+
+  const onBrowser = useCallback(async () => {
+    if (!remote.apkUrl) return;
+    setErr(null);
+    try {
+      await openApkInBrowser(remote.apkUrl);
+      setHint('Browser me download → file open → Install.');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not open link');
+    }
   }, [remote.apkUrl]);
 
   return (
@@ -51,7 +71,7 @@ export function UpdateModal({ visible, remote, localVersion, onClose }: Props) {
           <Text style={styles.badge}>UPDATE</Text>
           <Text style={styles.title}>Please update</Text>
           <Text style={styles.sub}>
-            New version {remote.version} available.\nYou have {localVersion}.
+            {`New version ${remote.version} available.\nYou have ${localVersion}.`}
           </Text>
           {!!remote.notes && <Text style={styles.notes}>{remote.notes}</Text>}
 
@@ -63,6 +83,7 @@ export function UpdateModal({ visible, remote, localVersion, onClose }: Props) {
           )}
 
           {err ? <Text style={styles.err}>{err}</Text> : null}
+          {hint ? <Text style={styles.hint}>{hint}</Text> : null}
 
           <TouchableOpacity
             style={[styles.primary, busy && styles.disabled]}
@@ -71,6 +92,15 @@ export function UpdateModal({ visible, remote, localVersion, onClose }: Props) {
             activeOpacity={0.85}
           >
             <Text style={styles.primaryText}>{busy ? 'Please wait…' : 'Update now'}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.browserBtn, busy && styles.disabled]}
+            onPress={() => void onBrowser()}
+            disabled={busy}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.browserText}>Open in browser (if install fails)</Text>
           </TouchableOpacity>
 
           {!remote.force && (
@@ -141,6 +171,13 @@ const styles = StyleSheet.create({
     color: '#e07a5f',
     marginBottom: 10,
   },
+  hint: {
+    fontFamily: FONTS.regular,
+    fontSize: 13,
+    color: COLORS.accent.green,
+    marginBottom: 10,
+    lineHeight: 18,
+  },
   primary: {
     backgroundColor: COLORS.accent.green,
     borderRadius: SIZES.radius.md,
@@ -153,6 +190,19 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.bold,
     fontSize: 16,
     color: COLORS.background,
+  },
+  browserBtn: {
+    marginTop: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderRadius: SIZES.radius.md,
+    borderWidth: 1,
+    borderColor: COLORS.glassBorder,
+  },
+  browserText: {
+    fontFamily: FONTS.medium,
+    fontSize: 13,
+    color: COLORS.text.secondary,
   },
   secondary: {
     paddingVertical: 14,
