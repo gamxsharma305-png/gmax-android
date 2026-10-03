@@ -1,5 +1,9 @@
 import NoteNativeModule from './src/NoteNativeModule';
-import { NativeStreamResult, PlatformInfo } from './src/NoteNative.types';
+import {
+  NativeDownloadResult,
+  NativeStreamResult,
+  PlatformInfo,
+} from './src/NoteNative.types';
 
 export * from './src/NoteNative.types';
 export { default as NoteNativeModule } from './src/NoteNativeModule';
@@ -26,6 +30,34 @@ export async function resolveYouTubeStream(
 
   try {
     return await module.resolveYouTubeStream(videoId);
+  } catch (e) {
+    return {
+      ok: false,
+      reason: 'unknown',
+      message: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
+
+/**
+ * Native full-file YouTube audio download (Musify-style).
+ * destPath = absolute path without file:// prefix.
+ */
+export async function downloadYouTubeAudio(
+  videoId: string,
+  destPath: string
+): Promise<NativeDownloadResult> {
+  const module = NoteNativeModule;
+  if (!module?.downloadYouTubeAudio) {
+    return {
+      ok: false,
+      reason: 'module_unavailable',
+      message: 'Native download not in this binary — rebuild APK',
+    };
+  }
+
+  try {
+    return await module.downloadYouTubeAudio(videoId, destPath);
   } catch (e) {
     return {
       ok: false,
