@@ -1,7 +1,7 @@
 /**
- * Offline audio download.
- * Prefers Saavn/Audius/direct CDN URLs (complete files, fast).
- * YouTube progressive URLs often truncate — used only as last resort.
+ * Offline audio download — YouTube only (Musify / youtube_explode pattern).
+ * Uses NewPipe progressive audio for the same video id.
+ * Does NOT replace the song with a Saavn/Audius title match.
  */
 import { Track } from '../core/types';
 import { MusicService } from './MusicService';
@@ -41,12 +41,12 @@ function safeName(trackId: string): string {
   return trackId.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120);
 }
 
-/** Minimum bytes for a "complete" download (avoid truncated last ~20s). */
+/** Minimum bytes for a "complete" download. */
 function minBytesFor(track: Track): number {
   const dur = Number(track.duration) || 0;
-  // ~64 kbps floor × duration, at least 80 KB
-  if (dur > 0) return Math.max(80_000, Math.floor(dur * 8_000));
-  return 80_000;
+  // ~48 kbps floor × duration, at least 60 KB
+  if (dur > 0) return Math.max(60_000, Math.floor(dur * 6_000));
+  return 60_000;
 }
 
 async function ensureDir(): Promise<void> {
@@ -61,6 +61,8 @@ async function ensureDir(): Promise<void> {
 export type DownloadResult = {
   localUri: string;
   alreadyHad: boolean;
+  /** Which YouTube video was saved */
+  youtubeId?: string;
 };
 
 async function downloadUrlToPath(
@@ -71,7 +73,6 @@ async function downloadUrlToPath(
 ): Promise<void> {
   if (!FileSystem) throw new Error('File system unavailable');
 
-  // Wipe any partial previous attempt
   try {
     await FileSystem.deleteAsync(path, { idempotent: true });
   } catch {
@@ -92,13 +93,12 @@ async function downloadUrlToPath(
   const info = await FileSystem.getInfoAsync(path);
   const size = info.size ?? 0;
 
-  // If server sent Content-Length, require full body
   const clRaw =
     result.headers?.['Content-Length'] ||
     result.headers?.['content-length'] ||
     '';
   const contentLength = Number(clRaw);
-  if (Number.isFinite(contentLength) && contentLength > 0 && size < contentLength * 0.95) {
+  if (Number.isFinite(contentLength) && contentLength > 0 && size < contentLength * 0.92) {
     try {
       await FileSystem.deleteAsync(path, { idempotent: true });
     } catch {
@@ -118,8 +118,8 @@ async function downloadUrlToPath(
 }
 
 /**
- * Resolve stream → download full audio → return file:// URI.
- * Prefers Saavn/CDN so files finish completely and quickly.
+ * Download THIS song from YouTube (same video / title match on YT only).
+ * Never swaps to Saavn or another provider's different track.
  */
 export async function downloadTrackAudio(
   track: Track,
@@ -131,6 +131,7 @@ export async function downloadTrackAudio(
 
   await ensureDir();
   const dir = offlineDir();
+  // Key by original track id so library links stay stable
   const path = `${dir}${safeName(track.id)}.m4a`;
   const minBytes = minBytesFor(track);
 
@@ -146,7 +147,7 @@ export async function downloadTrackAudio(
     }
   }
 
-  // Prefer offline-friendly stream (Saavn/Audius/direct) — complete + fast
+  // YouTube-only stream (NewPipe progressive audio)
   const stream = await MusicService.resolveStreamForOffline(track, signal);
   if (signal?.aborted) throw new Error('Download cancelled');
 
@@ -155,21 +156,33 @@ export async function downloadTrackAudio(
     return { localUri: stream.url, alreadyHad: true };
   }
 
-  const headers = stream.headers ?? {};
-  let lastErr: Error | null = null;
+  const headers: Record<string, string> = {
+    'User-Agent':
+      stream.headers?.['User-Agent'] ||
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    Accept: '*/*',
+    ...(stream.headers || {}),
+  };
 
-  // Up to 2 attempts — incomplete YouTube bodies often succeed on Saavn retry path already
-  for (let attempt = 0; attempt < 2; attempt++) {
+  let lastErr: Error | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      await downloadUrlToPath(stream.url, path, headers, minBytes);
-      return { localUri: path, alreadyHad: false };
+      // Fresh URL each retry (YouTube URLs expire / can truncate once)
+      const s =
+        attempt === 0 ? stream : await MusicService.resolveStreamForOffline(track, signal);
+      await downloadUrlToPath(s.url, path, { ...headers, ...(s.headers || {}) }, minBytes);
+      return {
+        localUri: path,
+        alreadyHad: false,
+        youtubeId: track.provider === 'youtube' ? track.sourceId : undefined,
+      };
     } catch (e) {
       lastErr = e instanceof Error ? e : new Error(String(e));
       if (signal?.aborted) throw new Error('Download cancelled');
     }
   }
 
-  throw lastErr ?? new Error('Download failed');
+  throw lastErr ?? new Error('YouTube download failed');
 }
 
 export async function localFileExists(uri?: string | null): Promise<boolean> {
