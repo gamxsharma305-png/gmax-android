@@ -1,7 +1,7 @@
 {
-  "version": "1.1.6",
-  "versionCode": 31,
-  "apkUrl": "",
+  "version": "1.1.9",
+  "versionCode": 34,
+  "apkUrl": "https://github.com/gamxsharma305-png/gmax-android/releases/download/v1.1.9/application-569a8f62-ec27-44c8-96f0-b86a2ca09c19.apk",
   "force": false,
-  "notes": "Latest GMAX build"
+  "notes": "Full YouTube offline download (Musify-style) + fixes"
 }
