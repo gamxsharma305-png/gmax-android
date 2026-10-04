@@ -4,7 +4,7 @@ import { EMPTY_SEARCH_RESULTS, SearchFilter, SearchResults } from '../core/types
 import { LibraryService } from '../services/LibraryService';
 import { MusicService } from '../services/MusicService';
 
-const DEBOUNCE_MS = 350;
+const DEBOUNCE_MS = 250;
 
 type UseSearch = {
   query: string;
@@ -81,7 +81,6 @@ export function useSearch(): UseSearch {
     const trimmed = query.trim();
     if (!trimmed) {
       abortRef.current?.abort();
-      requestId.current++;
       setResults(EMPTY_SEARCH_RESULTS);
       setSuggestions([]);
       setIsSearching(false);
@@ -89,10 +88,8 @@ export function useSearch(): UseSearch {
       return;
     }
 
-    setIsSearching(true);
-
     debounceRef.current = setTimeout(() => {
-      void run(trimmed, filter);
+      void run(query, filter);
     }, DEBOUNCE_MS);
 
     return () => {
@@ -107,29 +104,20 @@ export function useSearch(): UseSearch {
       return;
     }
 
-    let cancelled = false;
-    const timer = setTimeout(async () => {
-      const found = await MusicService.getSuggestions(trimmed);
-      if (!cancelled) setSuggestions(found);
+    const t = setTimeout(() => {
+      void MusicService.getSuggestions(trimmed)
+        .then(setSuggestions)
+        .catch(() => setSuggestions([]));
     }, DEBOUNCE_MS + 100);
 
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
+    return () => clearTimeout(t);
   }, [query]);
 
-  useEffect(
-    () => () => {
-      abortRef.current?.abort();
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    },
-    []
-  );
+  const setQuery = useCallback((q: string) => setQueryState(q), []);
+  const setFilter = useCallback((f: SearchFilter) => setFilterState(f), []);
 
   const searchNow = useCallback(
     (q: string, f?: SearchFilter) => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
       setQueryState(q);
       if (f) setFilterState(f);
       void run(q, f ?? filter);
@@ -143,7 +131,6 @@ export function useSearch(): UseSearch {
 
   const clear = useCallback(() => {
     abortRef.current?.abort();
-    requestId.current++;
     setQueryState('');
     setResults(EMPTY_SEARCH_RESULTS);
     setSuggestions([]);
@@ -151,17 +138,11 @@ export function useSearch(): UseSearch {
     setIsSearching(false);
   }, []);
 
-  const hasResults =
-    results.tracks.length > 0 ||
-    results.artists.length > 0 ||
-    results.albums.length > 0 ||
-    results.playlists.length > 0;
-
   return {
     query,
-    setQuery: setQueryState,
+    setQuery,
     filter,
-    setFilter: setFilterState,
+    setFilter,
     results,
     suggestions,
     isSearching,
@@ -169,6 +150,6 @@ export function useSearch(): UseSearch {
     searchNow,
     retry,
     clear,
-    hasResults,
+    hasResults: results.tracks.length > 0,
   };
 }
