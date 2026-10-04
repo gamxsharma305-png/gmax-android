@@ -3,14 +3,14 @@
     "name": "GMAX",
     "slug": "gmax",
     "owner": "gmax518",
-    "version": "1.2.6",
+    "version": "1.2.7",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#050707",
     "android": {
       "package": "com.gmax.player",
-      "versionCode": 41,
+      "versionCode": 42,
       "backgroundColor": "#050707",
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
