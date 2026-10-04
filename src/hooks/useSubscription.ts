@@ -39,6 +39,12 @@ export function useSubscription() {
     setState(SubscriptionService.getState());
   }, []);
 
+  const redeemPromoCode = useCallback(async (code: string) => {
+    const result = await SubscriptionService.redeemPromoCode(code);
+    setState(SubscriptionService.getState());
+    return result;
+  }, []);
+
   return {
     ready,
     isPremium: state.active && state.expiresAt > Date.now(),
@@ -46,11 +52,13 @@ export function useSubscription() {
     plans: PLANS,
     features: PREMIUM_FEATURES,
     daysLeft: SubscriptionService.daysLeft(),
+    promoLeft: SubscriptionService.promoRedemptionsLeft(),
     deviceId: SubscriptionService.getDeviceId(),
     canDownload: () => SubscriptionService.canDownload(),
     canUseAutoPlaylist: () => SubscriptionService.canUseAutoPlaylist(),
     canCreatePlaylist: (count: number) => SubscriptionService.canCreatePlaylist(count),
     claimWithPaymentId,
+    redeemPromoCode,
     refresh,
     clear,
   };
