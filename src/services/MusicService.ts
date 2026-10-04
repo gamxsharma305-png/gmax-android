@@ -47,34 +47,46 @@ class MusicServiceImpl {
     const q = query.trim();
     if (!q) return emptySearchResults();
 
-    const limit = options.limit ?? 24;
+    const limit = options.limit ?? 30;
+    // Fetch more YouTube so top of list is YT-heavy
+    const ytLimit = Math.min(24, Math.max(14, Math.ceil(limit * 0.75)));
 
-    let youtubeTracks: Track[] = [];
-    try {
-      const yt = await providers.default.search(q, { ...options, limit: Math.ceil(limit / 2) });
-      youtubeTracks = yt.tracks || [];
-    } catch {
-      youtubeTracks = [];
+    // Parallel: YouTube Innertube + Saavn/Audius/iTunes
+    const ytPromise = providers.default
+      .search(q, { ...options, limit: ytLimit })
+      .then((yt) => yt.tracks || [])
+      .catch(() => [] as Track[]);
+
+    const otherPromise = multiSourceSearch(q, {
+      limit,
+      signal: options.signal,
+      youtubeTracks: [],
+    }).catch(() => null);
+
+    const [youtubeTracks, other] = await Promise.all([ytPromise, otherPromise]);
+
+    // Manual merge: YouTube first, then other sources (dedupe)
+    const seen = new Set<string>();
+    const tracks: Track[] = [];
+    for (const t of [...youtubeTracks, ...(other?.tracks ?? [])]) {
+      const key = `${(t.title || '').toLowerCase()}|${(t.artist?.name || '').toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      tracks.push(t);
+      if (tracks.length >= limit) break;
     }
 
-    try {
-      return await multiSourceSearch(q, {
-        limit,
-        signal: options.signal,
-        youtubeTracks,
-      });
-    } catch (e) {
-      if (youtubeTracks.length) {
-        return {
-          query: q,
-          tracks: youtubeTracks.slice(0, limit),
-          artists: [],
-          albums: [],
-          playlists: [],
-        };
-      }
-      throw toAppError(e, 'search_failed');
+    if (!tracks.length) {
+      throw toAppError(new Error('No results'), 'search_failed');
     }
+
+    return {
+      query: q,
+      tracks,
+      artists: other?.artists ?? [],
+      albums: other?.albums ?? [],
+      playlists: other?.playlists ?? [],
+    };
   }
 
   async getSuggestions(input: string, signal?: AbortSignal): Promise<string[]> {
