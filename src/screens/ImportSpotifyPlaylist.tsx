@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, ExternalLink, Upload } from 'lucide-react-native';
+import { useSubscription } from '../hooks/useSubscription';
 import { useNavigation } from '@react-navigation/native';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { Track } from '../core/types';
@@ -23,9 +24,17 @@ const BATCH_SIZE = 6;
 const BATCH_PAUSE_MS = 200;
 
 export default function ImportSpotifyPlaylistScreen() {
+  const { isPremium } = useSubscription();
+
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { createPlaylist } = useLibrary();
+
+  React.useEffect(() => {
+    if (!isPremium) {
+      navigation.navigate('Paywall' as never);
+    }
+  }, [isPremium, navigation]);
 
   const [playlistName, setPlaylistName] = useState('Imported Spotify playlist');
   const [csvText, setCsvText] = useState('');
@@ -81,6 +90,10 @@ export default function ImportSpotifyPlaylistScreen() {
   };
 
   const onImport = useCallback(async () => {
+    if (!isPremium) {
+      navigation.navigate('Paywall' as never);
+      return;
+    }
     if (runningRef.current || isImporting) return;
     setErrorMsg(null);
     setStatusMsg(null);
@@ -133,7 +146,7 @@ export default function ImportSpotifyPlaylistScreen() {
       const missNote =
         missing.length > 0 ? ` · ${missing.length} not found` : '';
       setStatusMsg(
-        `Created “${playlist.name}” with ${ordered.length}/${rows.length} songs${missNote}`
+        `Created "${playlist.name}" with ${ordered.length}/${rows.length} songs${missNote}`
       );
       setCsvText('');
     } catch (e) {
@@ -142,7 +155,7 @@ export default function ImportSpotifyPlaylistScreen() {
       runningRef.current = false;
       setIsImporting(false);
     }
-  }, [csvText, playlistName, isImporting, createPlaylist]);
+  }, [csvText, playlistName, isImporting, createPlaylist, isPremium, navigation]);
 
   return (
     <View style={styles.container}>
@@ -164,6 +177,12 @@ export default function ImportSpotifyPlaylistScreen() {
         }}
         keyboardShouldPersistTaps="handled"
       >
+        {!isPremium ? (
+          <Text style={styles.errorText}>
+            Premium required — Get Key or pay to unlock Spotify import.
+          </Text>
+        ) : null}
+
         <Text style={styles.instructions}>
           1. Open Chosic exporter → paste your Spotify playlist link → download CSV{'\n'}
           2. Open the CSV, copy all text, paste below{'\n'}
@@ -180,7 +199,7 @@ export default function ImportSpotifyPlaylistScreen() {
           style={styles.input}
           value={playlistName}
           onChangeText={setPlaylistName}
-          editable={!isImporting}
+          editable={!isImporting && isPremium}
           placeholder="My Spotify playlist"
           placeholderTextColor={COLORS.text.muted}
         />
@@ -190,7 +209,7 @@ export default function ImportSpotifyPlaylistScreen() {
           style={[styles.input, styles.csvInput]}
           value={csvText}
           onChangeText={setCsvText}
-          editable={!isImporting}
+          editable={!isImporting && isPremium}
           multiline
           textAlignVertical="top"
           placeholder={'Song,Artist,...\nShape of You,Ed Sheeran'}
@@ -200,9 +219,9 @@ export default function ImportSpotifyPlaylistScreen() {
         />
 
         <TouchableOpacity
-          style={[styles.primaryBtn, isImporting && styles.primaryBtnDisabled]}
+          style={[styles.primaryBtn, (isImporting || !isPremium) && styles.primaryBtnDisabled]}
           onPress={onImport}
-          disabled={isImporting}
+          disabled={isImporting || !isPremium}
           activeOpacity={0.85}
         >
           {isImporting ? (
@@ -211,7 +230,7 @@ export default function ImportSpotifyPlaylistScreen() {
             <Upload color="#000" size={18} />
           )}
           <Text style={styles.primaryBtnText}>
-            {isImporting ? 'Importing…' : 'Import playlist'}
+            {isImporting ? 'Importing…' : isPremium ? 'Import playlist' : 'Premium required'}
           </Text>
         </TouchableOpacity>
 
