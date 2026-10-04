@@ -1,16 +1,5 @@
 import { readJson, writeJson, STORAGE_KEYS } from '../core/storage';
-import { claimPremium, fetchPremiumStatus } from './PremiumApi';
-
-/**
- * GMAX Premium — secure path:
- * 1) User pays on Razorpay Payment Link
- * 2) App sends pay_… + deviceId to Vercel /api/claim
- * 3) Server verifies with Razorpay Key Secret → only then unlock
- *
- * Links:
- *  ₹19 → https://rzp.io/rzp/CXGmrGhC
- *  ₹39 → https://rzp.io/rzp/bNWwvel
- */
+import { claimPremium, fetchPremiumStatus, getAroKey, verifyAroKey } from './PremiumApi';
 
 export type PlanId = 'monthly' | 'bimonthly';
 
@@ -30,7 +19,6 @@ export type SubscriptionState = {
   paymentId?: string;
   activatedAt?: number;
   deviceId?: string;
-  /** Timestamps of promo/aero redemptions (for 2×/month limit) */
   promoRedemptions?: number[];
 };
 
@@ -64,7 +52,6 @@ export const PREMIUM_FEATURES = [
   'Premium support',
 ] as const;
 
-/** Promo / Aero link: 15 days each, max 2 redemptions per rolling 30 days */
 export const PROMO_DAYS = 15;
 export const PROMO_MAX_PER_MONTH = 2;
 export const PROMO_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
@@ -176,12 +163,10 @@ class SubscriptionServiceImpl {
     if (id.length < 10) {
       return { ok: false, error: 'Enter full Razorpay Payment ID (pay_…)' };
     }
-
     const result = await claimPremium(id, this.deviceId || (await this.ensureDevice()));
     if (!result.ok || !result.active || !result.expiresAt) {
       return { ok: false, error: result.error || 'Payment not verified' };
     }
-
     await this.applyServerEntitlement({
       planId: result.planId || 'monthly',
       expiresAt: result.expiresAt,
@@ -219,85 +204,40 @@ class SubscriptionServiceImpl {
     this.notify();
   }
 
+  /** AroLinks: 15 days/key, max 2 per 30 days, device-bound 12-digit. */
   async redeemPromoCode(raw: string): Promise<{ ok: boolean; error?: string; daysAdded?: number }> {
-    const code = raw.trim();
-    if (code.length < 4) return { ok: false, error: 'Enter promo / aero code' };
-
+    const code = raw.trim().replace(/\D/g, '');
+    if (code.length !== 12) {
+      return { ok: false, error: '12-digit code daalo (AroLinks se copy)' };
+    }
     const now = Date.now();
     const recent = (this.state.promoRedemptions || []).filter((t) => now - t < PROMO_WINDOW_MS);
     if (recent.length >= PROMO_MAX_PER_MONTH) {
       const oldest = Math.min(...recent);
       const waitDays = Math.ceil((PROMO_WINDOW_MS - (now - oldest)) / (24 * 60 * 60 * 1000));
-      return {
-        ok: false,
-        error: `Limit: 2 codes / 30 days. Try again in ~${waitDays} days`,
-      };
+      return { ok: false, error: `Limit: 2 keys / 30 days. ~${waitDays} din baad try karo` };
     }
-
-    try {
-      const { PREMIUM_API_BASE } = await import('./PremiumApi');
-      const root = (PREMIUM_API_BASE || '').replace(/\/$/, '');
-      if (root) {
-        const res = await fetch(`${root}/api/redeem`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            code,
-            deviceId: this.deviceId || (await this.ensureDevice()),
-          }),
-        });
-        const data = (await res.json().catch(() => ({}))) as {
-          ok?: boolean;
-          active?: boolean;
-          expiresAt?: number;
-          days?: number;
-          error?: string;
-        };
-        if (res.ok && data.ok && data.expiresAt) {
-          const days = data.days || PROMO_DAYS;
-          await this.applyServerEntitlement({
-            planId: 'monthly',
-            expiresAt: data.expiresAt,
-            paymentId: `promo:${code.slice(0, 24)}`,
-          });
-          this.state.promoRedemptions = [...recent, now];
-          await writeJson(STORAGE_KEY, this.state);
-          this.notify();
-          return { ok: true, daysAdded: days };
-        }
-        if (data.error && res.status !== 404) {
-          return { ok: false, error: data.error };
-        }
-      }
-    } catch {
-      /* fall through */
+    const deviceId = this.deviceId || (await this.ensureDevice());
+    const result = await verifyAroKey(code, deviceId);
+    if (!result.ok || !result.until) {
+      return { ok: false, error: result.error || 'Invalid code' };
     }
-
-    const normalized = code.toUpperCase().replace(/\s+/g, '');
-    const localOk =
-      normalized.startsWith('GMAX15-') ||
-      normalized.startsWith('AERO-') ||
-      normalized.startsWith('GMAX-') ||
-      /^[A-Z0-9]{8,}$/.test(normalized);
-
-    if (!localOk) {
-      return { ok: false, error: 'Invalid code. Use aero link / GMAX15-… code' };
-    }
-
-    const base = Math.max(this.state.expiresAt || 0, now);
-    const expiresAt = base + PROMO_DAYS * 24 * 60 * 60 * 1000;
-    this.state = {
-      active: true,
+    const localBase = Math.max(this.state.expiresAt || 0, now);
+    const until = Math.max(result.until, localBase + PROMO_DAYS * 24 * 60 * 60 * 1000);
+    await this.applyServerEntitlement({
       planId: 'monthly',
-      expiresAt,
-      paymentId: `promo:${normalized.slice(0, 24)}`,
-      activatedAt: now,
-      deviceId: this.deviceId,
-      promoRedemptions: [...recent, now],
-    };
+      expiresAt: until,
+      paymentId: `arolinks:${code.slice(0, 6)}`,
+    });
+    this.state.promoRedemptions = [...recent, now];
     await writeJson(STORAGE_KEY, this.state);
     this.notify();
-    return { ok: true, daysAdded: PROMO_DAYS };
+    return { ok: true, daysAdded: result.days || PROMO_DAYS };
+  }
+
+  async requestAroKey(): Promise<{ ok: boolean; shortUrl?: string; fallbackUrl?: string; error?: string }> {
+    const deviceId = this.deviceId || (await this.ensureDevice());
+    return getAroKey(deviceId);
   }
 
   promoRedemptionsLeft(): number {
