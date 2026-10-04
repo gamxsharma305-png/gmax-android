@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { LibraryProvider } from './src/hooks/useLibrary';
@@ -36,30 +37,32 @@ export default function App() {
   }, []);
 
   return (
-    <SafeAreaProvider>
-      <LibraryProvider>
-        <ThemeProvider>
-          <PlayerProvider>
-            <View style={styles.webWrapper}>
-              <View style={styles.appContainer}>
-                <RootNavigator />
-                <YouTubeHost />
-                <StatusBar style="light" backgroundColor="#050707" />
-                {showSplash ? <GSplash onDone={() => setShowSplash(false)} /> : null}
-                {updateRemote ? (
-                  <UpdateModal
-                    visible={showUpdate}
-                    remote={updateRemote}
-                    localVersion={localVersion}
-                    onClose={() => setShowUpdate(false)}
-                  />
-                ) : null}
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <LibraryProvider>
+          <ThemeProvider>
+            <PlayerProvider>
+              <View style={styles.webWrapper}>
+                <View style={styles.appContainer}>
+                  <RootNavigator />
+                  <YouTubeHost />
+                  <StatusBar style="light" backgroundColor="#050707" />
+                  {showSplash ? <GSplash onDone={() => setShowSplash(false)} /> : null}
+                  {updateRemote ? (
+                    <UpdateModal
+                      visible={showUpdate}
+                      remote={updateRemote}
+                      localVersion={localVersion}
+                      onClose={() => setShowUpdate(false)}
+                    />
+                  ) : null}
+                </View>
               </View>
-            </View>
-          </PlayerProvider>
-        </ThemeProvider>
-      </LibraryProvider>
-    </SafeAreaProvider>
+            </PlayerProvider>
+          </ThemeProvider>
+        </LibraryProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
