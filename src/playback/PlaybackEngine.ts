@@ -147,7 +147,19 @@ export class PlaybackEngine {
       this.status = { ...IDLE_STATUS, isBuffering: true, volume: this.desiredVolume };
       this.listeners.onStatus?.(this.status);
 
-      player.replace({ uri: stream.url, headers: stream.headers });
+      // Local offline files must NOT send HTTP headers — breaks expo-audio on Android
+      const isLocal =
+        stream.url.startsWith('file://') ||
+        stream.resolvedBy === 'local' ||
+        stream.url.startsWith('/');
+      if (isLocal) {
+        player.replace({ uri: stream.url });
+      } else {
+        player.replace({
+          uri: stream.url,
+          ...(stream.headers ? { headers: stream.headers } : {}),
+        });
+      }
       player.volume = this.desiredVolume;
 
       this.clearLoadTimer();
