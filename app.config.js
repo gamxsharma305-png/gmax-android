@@ -65,7 +65,7 @@ module.exports = {
   ...appJson.expo,
   name: "GMAX",
   slug: "gmax",
-  owner: "gmax519",
+  owner: "gmax518",
   version: "1.2.0",
   orientation: "portrait",
   userInterfaceStyle: "dark",
@@ -117,7 +117,7 @@ module.exports = {
   extra: {
     ...(appJson.expo && appJson.expo.extra ? appJson.expo.extra : {}),
     eas: {
-      projectId: "d0b9f8bc-3fe4-48a4-97b8-52a2476cd528",
+      projectId: "5bda171f-47fa-4849-8202-9303eb06381e",
     },
   },
 };

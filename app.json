@@ -2,7 +2,7 @@
   "expo": {
     "name": "GMAX",
     "slug": "gmax",
-    "owner": "gmax519",
+    "owner": "gmax518",
     "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -23,7 +23,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "d0b9f8bc-3fe4-48a4-97b8-52a2476cd528"
+        "projectId": "5bda171f-47fa-4849-8202-9303eb06381e"
       }
     }
   }
