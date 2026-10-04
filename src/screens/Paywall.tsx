@@ -32,19 +32,31 @@ function extractPaymentId(url: string): string | null {
 export default function PaywallScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { isPremium, plans, features, daysLeft, state, claimWithPaymentId } = useSubscription();
+  const {
+    isPremium,
+    plans,
+    features,
+    daysLeft,
+    state,
+    claimWithPaymentId,
+    redeemPromoCode,
+    requestAroKey,
+    promoLeft,
+  } = useSubscription();
 
   const [selected, setSelected] = useState<PlanId>('monthly');
   const [webUrl, setWebUrl] = useState<string | null>(null);
   const [paymentIdInput, setPaymentIdInput] = useState('');
+  const [keyCodeInput, setKeyCodeInput] = useState('');
   const [claiming, setClaiming] = useState(false);
+  const [keyLoading, setKeyLoading] = useState(false);
+  const [keyVerifying, setKeyVerifying] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const pendingPlan = useRef<PlanId | null>(null);
 
   const selectedPlan = plans.find((p) => p.id === selected) ?? plans[0];
 
-  /** Preferred: system browser — full UPI apps + scroll works */
   const openInBrowser = useCallback(
     async (plan?: Plan) => {
       const p = plan ?? selectedPlan;
@@ -67,7 +79,6 @@ export default function PaywallScreen() {
     [selectedPlan]
   );
 
-  /** In-app WebView fallback (full screen, UPI intent support) */
   const openInWebView = useCallback(() => {
     if (!selectedPlan?.paymentLink) return;
     pendingPlan.current = selectedPlan.id;
@@ -97,6 +108,53 @@ export default function PaywallScreen() {
     setTimeout(() => navigation.goBack(), 900);
   }, [paymentIdInput, claimWithPaymentId, navigation]);
 
+  const onGetKey = useCallback(async () => {
+    setErr(null);
+    setMsg(null);
+    setKeyLoading(true);
+    try {
+      const result = await requestAroKey();
+      if (result.ok && result.shortUrl) {
+        setMsg('AroLinks open hua — steps complete karke 12-digit code copy karo');
+        await Linking.openURL(result.shortUrl);
+      } else if (result.fallbackUrl) {
+        setMsg('Fallback link open…');
+        await Linking.openURL(result.fallbackUrl);
+      } else {
+        setErr(result.error || 'Get Key fail — Vercel AROLINKS_TOKEN check karo');
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Get Key failed');
+    } finally {
+      setKeyLoading(false);
+    }
+  }, [requestAroKey]);
+
+  const onVerifyKey = useCallback(async () => {
+    const code = keyCodeInput.trim().replace(/\s+/g, '');
+    if (!code || code.length < 8) {
+      setErr('12-digit code daalo (AroLinks se)');
+      return;
+    }
+    setErr(null);
+    setMsg(null);
+    setKeyVerifying(true);
+    try {
+      const result = await redeemPromoCode(code);
+      if (result.ok) {
+        setMsg(`Unlocked! +${result.daysAdded || 15} days premium`);
+        setKeyCodeInput('');
+        setTimeout(() => navigation.goBack(), 1200);
+      } else {
+        setErr(result.error || 'Invalid / expired code');
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Verify failed');
+    } finally {
+      setKeyVerifying(false);
+    }
+  }, [keyCodeInput, redeemPromoCode, navigation]);
+
   const onNavChange = useCallback((nav: WebViewNavigation) => {
     const u = nav.url || '';
     const pid = extractPaymentId(u);
@@ -107,7 +165,6 @@ export default function PaywallScreen() {
     }
   }, []);
 
-  /** Open UPI / PhonePe / GPay intents outside WebView */
   const onShouldStart = useCallback((req: { url: string }) => {
     const url = req.url || '';
     if (
@@ -120,7 +177,6 @@ export default function PaywallScreen() {
       url.startsWith('market://')
     ) {
       Linking.openURL(url).catch(() => {
-        // intent:// fallback: try extracting browser_fallback_url
         const fb = url.match(/browser_fallback_url=([^;]+)/);
         if (fb?.[1]) {
           void Linking.openURL(decodeURIComponent(fb[1]));
@@ -157,7 +213,7 @@ export default function PaywallScreen() {
           <Text style={styles.heroSub}>
             {isPremium
               ? `${daysLeft} day${daysLeft === 1 ? '' : 's'} left · ${state.planId ?? ''}`
-              : 'Pay in browser (UPI) → enter Payment ID → unlock'}
+              : 'Free AroLinks key (15 days) ya paid plan'}
           </Text>
         </View>
 
@@ -176,7 +232,50 @@ export default function PaywallScreen() {
 
         {!isPremium && (
           <>
-            <Text style={styles.sectionLabel}>1. CHOOSE PLAN & PAY</Text>
+            <Text style={styles.sectionLabel}>FREE KEY (AroLinks)</Text>
+            <View style={styles.keyCard}>
+              <Text style={styles.keyTitle}>Free unlock (AroLinks)</Text>
+              <Text style={styles.keyHint}>
+                Get Key → ads/steps complete → 12-digit code copy → Verify.\n15 din / key · max 2
+                keys / 30 din
+                {typeof promoLeft === 'number' ? ` · ${promoLeft} left` : ''}
+              </Text>
+              <TouchableOpacity
+                style={styles.getKeyBtn}
+                onPress={() => void onGetKey()}
+                disabled={keyLoading}
+                activeOpacity={0.85}
+              >
+                {keyLoading ? (
+                  <ActivityIndicator color="#000" />
+                ) : (
+                  <Text style={styles.getKeyBtnText}>Get Key</Text>
+                )}
+              </TouchableOpacity>
+              <TextInput
+                style={styles.input}
+                value={keyCodeInput}
+                onChangeText={setKeyCodeInput}
+                placeholder="12-digit code"
+                placeholderTextColor={COLORS.text.muted}
+                keyboardType="number-pad"
+                maxLength={14}
+              />
+              <TouchableOpacity
+                style={styles.unlockBtn}
+                onPress={() => void onVerifyKey()}
+                disabled={keyVerifying}
+                activeOpacity={0.85}
+              >
+                {keyVerifying ? (
+                  <ActivityIndicator color={COLORS.accent.green} />
+                ) : (
+                  <Text style={styles.unlockBtnText}>Verify Key</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+
+            <Text style={[styles.sectionLabel, { marginTop: SIZES.md }]}>OR PAY</Text>
             {plans.map((p) => {
               const active = selected === p.id;
               return (
@@ -195,7 +294,6 @@ export default function PaywallScreen() {
               );
             })}
 
-            {/* Primary: browser — UPI always works */}
             <TouchableOpacity
               style={styles.payBtn}
               onPress={() => void openInBrowser()}
@@ -215,7 +313,7 @@ export default function PaywallScreen() {
               hide ho jata hai — isliye Browser button recommended.
             </Text>
 
-            <Text style={[styles.sectionLabel, { marginTop: SIZES.lg }]}>2. CLAIM</Text>
+            <Text style={[styles.sectionLabel, { marginTop: SIZES.lg }]}>2. CLAIM (paid)</Text>
             <Text style={styles.claimHint}>
               Payment ke baad Razorpay se Payment ID (pay_…) copy karke yahan paste karo, phir
               Verify & Unlock.
@@ -253,11 +351,10 @@ export default function PaywallScreen() {
         {err ? <Text style={styles.err}>{err}</Text> : null}
 
         <Text style={styles.footnote}>
-          Unlock only after server confirms payment (webhook). Fake ID se unlock nahi hoga.
+          Free: AroLinks key (15 days × 2). Paid: Razorpay payment ID verify after pay.
         </Text>
       </ScrollView>
 
-      {/* Full-screen WebView — no bottom bar blocking Pay button */}
       <Modal visible={!!webUrl} animationType="slide" onRequestClose={() => setWebUrl(null)}>
         <View style={[styles.webWrap, { paddingTop: insets.top }]}>
           <View style={styles.webBar}>
@@ -295,7 +392,6 @@ export default function PaywallScreen() {
                 : {})}
             />
           ) : null}
-          {/* Thin safe bar only — does NOT cover payment methods */}
           <View style={{ height: Math.max(insets.bottom, 8), backgroundColor: '#fff' }} />
         </View>
       </Modal>
@@ -339,6 +435,29 @@ const styles = StyleSheet.create({
     color: COLORS.text.muted,
     marginBottom: SIZES.sm,
   },
+  keyCard: {
+    marginBottom: SIZES.md,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(29,185,84,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(29,185,84,0.35)',
+    gap: 10,
+  },
+  keyTitle: { fontFamily: FONTS.bold, fontSize: 16, color: COLORS.text.primary },
+  keyHint: {
+    fontFamily: FONTS.regular,
+    fontSize: 12,
+    color: COLORS.text.secondary,
+    lineHeight: 17,
+  },
+  getKeyBtn: {
+    backgroundColor: COLORS.accent.green,
+    paddingVertical: 13,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  getKeyBtnText: { fontFamily: FONTS.bold, fontSize: 15, color: '#000' },
   planCard: {
     flexDirection: 'row',
     alignItems: 'center',
