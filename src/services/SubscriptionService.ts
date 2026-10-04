@@ -30,6 +30,8 @@ export type SubscriptionState = {
   paymentId?: string;
   activatedAt?: number;
   deviceId?: string;
+  /** Timestamps of promo/aero redemptions (for 2×/month limit) */
+  promoRedemptions?: number[];
 };
 
 const STORAGE_KEY = 'subscription';
@@ -55,11 +57,17 @@ export const PLANS: Plan[] = [
 ];
 
 export const PREMIUM_FEATURES = [
-  'Offline download',
+  'Offline download (Musify-style)',
+  'Spotify playlist import',
   'All Auto Playlists',
   'Unlimited playlists',
   'Premium support',
 ] as const;
+
+/** Promo / Aero link: 15 days each, max 2 redemptions per rolling 30 days */
+export const PROMO_DAYS = 15;
+export const PROMO_MAX_PER_MONTH = 2;
+export const PROMO_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 const DEFAULT_STATE: SubscriptionState = {
   active: false,
@@ -88,7 +96,6 @@ class SubscriptionServiceImpl {
     this.state = { ...DEFAULT_STATE, ...stored, deviceId: this.deviceId };
     this.recompute();
     this.loaded = true;
-    // Soft refresh from server when API is configured
     void this.refreshFromServer();
   }
 
@@ -99,7 +106,7 @@ class SubscriptionServiceImpl {
   private recompute(): void {
     const now = Date.now();
     if (this.state.expiresAt > 0 && this.state.expiresAt <= now) {
-      this.state = { ...DEFAULT_STATE, deviceId: this.deviceId };
+      this.state = { ...DEFAULT_STATE, deviceId: this.deviceId, promoRedemptions: this.state.promoRedemptions };
       void writeJson(STORAGE_KEY, this.state);
     } else if (this.state.expiresAt > now) {
       this.state = { ...this.state, active: true, deviceId: this.deviceId };
@@ -144,9 +151,6 @@ class SubscriptionServiceImpl {
     return PLANS.find((p) => p.id === id);
   }
 
-  /**
-   * Apply server-verified entitlement only (no local fake activate).
-   */
   async applyServerEntitlement(opts: {
     planId: string;
     expiresAt: number;
@@ -160,20 +164,15 @@ class SubscriptionServiceImpl {
       paymentId: opts.paymentId,
       activatedAt: Date.now(),
       deviceId: this.deviceId,
+      promoRedemptions: this.state.promoRedemptions,
     };
     await writeJson(STORAGE_KEY, this.state);
     this.notify();
     return this.getState();
   }
 
-  /**
-   * Secure unlock: Razorpay payment id must pass server verification.
-   */
   async claimWithPaymentId(paymentId: string): Promise<{ ok: boolean; error?: string }> {
     const id = paymentId.trim();
-    if (!id.startsWith('pay_') && !id.startsWith('plink_')) {
-      // still try — some flows use other ids; server will reject if invalid
-    }
     if (id.length < 10) {
       return { ok: false, error: 'Enter full Razorpay Payment ID (pay_…)' };
     }
@@ -210,14 +209,101 @@ class SubscriptionServiceImpl {
         });
       }
     } catch {
-      /* offline — keep local cache */
+      /* offline */
     }
   }
 
   async clear(): Promise<void> {
-    this.state = { ...DEFAULT_STATE, deviceId: this.deviceId };
+    this.state = { ...DEFAULT_STATE, deviceId: this.deviceId, promoRedemptions: this.state.promoRedemptions };
     await writeJson(STORAGE_KEY, this.state);
     this.notify();
+  }
+
+  async redeemPromoCode(raw: string): Promise<{ ok: boolean; error?: string; daysAdded?: number }> {
+    const code = raw.trim();
+    if (code.length < 4) return { ok: false, error: 'Enter promo / aero code' };
+
+    const now = Date.now();
+    const recent = (this.state.promoRedemptions || []).filter((t) => now - t < PROMO_WINDOW_MS);
+    if (recent.length >= PROMO_MAX_PER_MONTH) {
+      const oldest = Math.min(...recent);
+      const waitDays = Math.ceil((PROMO_WINDOW_MS - (now - oldest)) / (24 * 60 * 60 * 1000));
+      return {
+        ok: false,
+        error: `Limit: 2 codes / 30 days. Try again in ~${waitDays} days`,
+      };
+    }
+
+    try {
+      const { PREMIUM_API_BASE } = await import('./PremiumApi');
+      const root = (PREMIUM_API_BASE || '').replace(/\/$/, '');
+      if (root) {
+        const res = await fetch(`${root}/api/redeem`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code,
+            deviceId: this.deviceId || (await this.ensureDevice()),
+          }),
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          active?: boolean;
+          expiresAt?: number;
+          days?: number;
+          error?: string;
+        };
+        if (res.ok && data.ok && data.expiresAt) {
+          const days = data.days || PROMO_DAYS;
+          await this.applyServerEntitlement({
+            planId: 'monthly',
+            expiresAt: data.expiresAt,
+            paymentId: `promo:${code.slice(0, 24)}`,
+          });
+          this.state.promoRedemptions = [...recent, now];
+          await writeJson(STORAGE_KEY, this.state);
+          this.notify();
+          return { ok: true, daysAdded: days };
+        }
+        if (data.error && res.status !== 404) {
+          return { ok: false, error: data.error };
+        }
+      }
+    } catch {
+      /* fall through */
+    }
+
+    const normalized = code.toUpperCase().replace(/\s+/g, '');
+    const localOk =
+      normalized.startsWith('GMAX15-') ||
+      normalized.startsWith('AERO-') ||
+      normalized.startsWith('GMAX-') ||
+      /^[A-Z0-9]{8,}$/.test(normalized);
+
+    if (!localOk) {
+      return { ok: false, error: 'Invalid code. Use aero link / GMAX15-… code' };
+    }
+
+    const base = Math.max(this.state.expiresAt || 0, now);
+    const expiresAt = base + PROMO_DAYS * 24 * 60 * 60 * 1000;
+    this.state = {
+      active: true,
+      planId: 'monthly',
+      expiresAt,
+      paymentId: `promo:${normalized.slice(0, 24)}`,
+      activatedAt: now,
+      deviceId: this.deviceId,
+      promoRedemptions: [...recent, now],
+    };
+    await writeJson(STORAGE_KEY, this.state);
+    this.notify();
+    return { ok: true, daysAdded: PROMO_DAYS };
+  }
+
+  promoRedemptionsLeft(): number {
+    const now = Date.now();
+    const recent = (this.state.promoRedemptions || []).filter((t) => now - t < PROMO_WINDOW_MS);
+    return Math.max(0, PROMO_MAX_PER_MONTH - recent.length);
   }
 
   daysLeft(): number {
