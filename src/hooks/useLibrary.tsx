@@ -34,6 +34,8 @@ type LibraryContextType = {
   renamePlaylist: (id: string, name: string) => void;
   addToPlaylist: (playlistId: string, tracks: Track | Track[]) => void;
   removeFromPlaylist: (playlistId: string, trackId: string) => void;
+  reorderPlaylistTracks: (playlistId: string, fromIndex: number, toIndex: number) => void;
+  reorderLikedTracks: (fromIndex: number, toIndex: number) => void;
   importPlaylist: (url: string) => Promise<Playlist>;
   importing: boolean;
   importError: string | null;
@@ -164,6 +166,22 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
     [sync]
   );
 
+  const reorderPlaylistTracks = useCallback(
+    (playlistId: string, fromIndex: number, toIndex: number) => {
+      LibraryService.reorderPlaylistTracks(playlistId, fromIndex, toIndex);
+      sync();
+    },
+    [sync]
+  );
+
+  const reorderLikedTracks = useCallback(
+    (fromIndex: number, toIndex: number) => {
+      LibraryService.reorderLikedTracks(fromIndex, toIndex);
+      sync();
+    },
+    [sync]
+  );
+
   const importPlaylist = useCallback(
     async (url: string): Promise<Playlist> => {
       setImporting(true);
@@ -240,6 +258,8 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       renamePlaylist,
       addToPlaylist,
       removeFromPlaylist,
+      reorderPlaylistTracks,
+      reorderLikedTracks,
       importPlaylist,
       importing,
       importError,
@@ -265,6 +285,8 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       renamePlaylist,
       addToPlaylist,
       removeFromPlaylist,
+      reorderPlaylistTracks,
+      reorderLikedTracks,
       importPlaylist,
       importing,
       importError,
