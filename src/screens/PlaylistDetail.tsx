@@ -1,15 +1,29 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  FlatList,
   Image,
+  LayoutAnimation,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
+  UIManager,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronLeft, Play, Shuffle, ListPlus } from 'lucide-react-native';
+import {
+  ChevronLeft,
+  Play,
+  Shuffle,
+  ListPlus,
+  GripVertical,
+  ListOrdered,
+  Check,
+} from 'lucide-react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import DraggableFlatList, {
+  RenderItemParams,
+  ScaleDecorator,
+} from 'react-native-draggable-flatlist';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { TrackRow } from '../components/lists/TrackRow';
 import { AddToPlaylistSheet } from '../components/lists/AddToPlaylistSheet';
@@ -18,6 +32,10 @@ import { GlassCard } from '../components/common/GlassCard';
 import { Track } from '../core/types';
 import { usePlayer } from '../hooks/usePlayer';
 import { useLibrary } from '../hooks/useLibrary';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 type PlaylistRouteParams = { playlistId: string };
 type PlaylistRoute = RouteProp<{ Playlist: PlaylistRouteParams }, 'Playlist'>;
@@ -28,7 +46,12 @@ export default function PlaylistDetailScreen() {
   const route = useRoute<PlaylistRoute>();
   const { playlistId } = route.params;
 
-  const { playlists, likedPlaylist } = useLibrary();
+  const {
+    playlists,
+    likedPlaylist,
+    reorderPlaylistTracks,
+    reorderLikedTracks,
+  } = useLibrary();
   const {
     playTrack,
     addToQueue,
@@ -41,13 +64,18 @@ export default function PlaylistDetailScreen() {
   } = usePlayer();
 
   const [addingTrack, setAddingTrack] = useState<Track | null>(null);
+  const [reorderMode, setReorderMode] = useState(false);
 
   const playlist = useMemo(
-    () => (playlistId === 'liked' ? likedPlaylist : playlists.find((p) => p.id === playlistId)),
+    () =>
+      playlistId === 'liked'
+        ? likedPlaylist
+        : playlists.find((p) => p.id === playlistId),
     [playlistId, playlists, likedPlaylist]
   );
 
   const tracks = playlist?.tracks ?? [];
+  const canReorder = tracks.length > 1;
 
   const playFromStart = useCallback(() => {
     if (!tracks.length || !playlist) return;
@@ -68,39 +96,79 @@ export default function PlaylistDetailScreen() {
 
   const onTrackPress = useCallback(
     (track: Track) => {
+      if (reorderMode) return;
       if (!playlist) return;
       playTrack(track, { tracks, label: playlist.name });
     },
-    [playTrack, tracks, playlist]
+    [playTrack, tracks, playlist, reorderMode]
   );
 
+  const onDragEnd = useCallback(
+    ({ from, to }: { data: Track[]; from: number; to: number }) => {
+      if (from === to) return;
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      if (playlistId === 'liked') {
+        reorderLikedTracks(from, to);
+      } else if (playlistId) {
+        reorderPlaylistTracks(playlistId, from, to);
+      }
+    },
+    [playlistId, reorderLikedTracks, reorderPlaylistTracks]
+  );
+
+  const toggleReorder = useCallback(() => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setReorderMode((v) => !v);
+  }, []);
+
   const renderItem = useCallback(
-    ({ item }: { item: Track }) => (
-      <TrackRow
-        track={item}
-        onPress={onTrackPress}
-        onMorePress={setAddingTrack}
-        isPlaying={currentTrack?.id === item.id && isPlaying}
-      />
-    ),
-    [onTrackPress, currentTrack?.id, isPlaying]
+    ({ item, drag, isActive }: RenderItemParams<Track>) => {
+      return (
+        <ScaleDecorator activeScale={1.03}>
+          <View style={[styles.rowWrap, isActive && styles.rowActive]}>
+            {reorderMode && (
+              <TouchableOpacity
+                onLongPress={drag}
+                delayLongPress={80}
+                style={styles.grip}
+                hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+              >
+                <GripVertical
+                  color={isActive ? COLORS.accent.green : COLORS.text.secondary}
+                  size={22}
+                />
+              </TouchableOpacity>
+            )}
+            <View style={styles.rowFlex}>
+              <TrackRow
+                track={item}
+                onPress={onTrackPress}
+                onMorePress={reorderMode ? undefined : setAddingTrack}
+                isPlaying={!reorderMode && currentTrack?.id === item.id && isPlaying}
+              />
+            </View>
+          </View>
+        </ScaleDecorator>
+      );
+    },
+    [reorderMode, onTrackPress, currentTrack?.id, isPlaying]
   );
 
   if (!playlist) {
     return (
-      <View style={[styles.container, { paddingTop: insets.top + SIZES.lg }]}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <ChevronLeft color={COLORS.text.primary} size={28} />
+      <View style={[styles.container, { paddingTop: insets.top + 16 }]}>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+          <ChevronLeft color={COLORS.text.primary} size={24} />
         </TouchableOpacity>
-        <GlassCard intensity={20} style={styles.emptyCard}>
-          <Text style={styles.emptyText}>This playlist is no longer available.</Text>
-        </GlassCard>
+        <Text style={[styles.title, { marginTop: 60, marginHorizontal: SIZES.md }]}>
+          Playlist not found
+        </Text>
       </View>
     );
   }
 
   const header = (
-    <View style={styles.headerBlock}>
+    <View style={[styles.headerBlock, { paddingTop: insets.top + 52 }]}>
       <View style={styles.artworkWrap}>
         {playlist.coverImageUrl ? (
           <Image source={{ uri: playlist.coverImageUrl }} style={styles.artwork} />
@@ -108,79 +176,87 @@ export default function PlaylistDetailScreen() {
           <View style={[styles.artwork, styles.artworkFallback]} />
         )}
       </View>
-
-      <Text style={styles.title} numberOfLines={2}>{playlist.name}</Text>
-      <Text style={styles.meta} numberOfLines={1}>
-        {playlist.creator ? `${playlist.creator} • ` : ''}
-        {tracks.length} {tracks.length === 1 ? 'track' : 'tracks'}
+      <Text style={styles.title} numberOfLines={2}>
+        {playlist.name}
       </Text>
-
+      <Text style={styles.meta}>
+        {tracks.length} song{tracks.length === 1 ? '' : 's'}
+        {playlist.creator ? ` · ${playlist.creator}` : ''}
+      </Text>
       <View style={styles.actions}>
         <TouchableOpacity
           style={[styles.primaryAction, !tracks.length && styles.actionDisabled]}
-          activeOpacity={0.85}
           onPress={playFromStart}
           disabled={!tracks.length}
         >
-          <Play color={COLORS.background} size={20} fill={COLORS.background} />
+          <Play color={COLORS.background} size={18} fill={COLORS.background} />
           <Text style={styles.primaryActionText}>Play</Text>
         </TouchableOpacity>
-
         <TouchableOpacity
           style={[styles.secondaryAction, !tracks.length && styles.actionDisabled]}
-          activeOpacity={0.85}
           onPress={playShuffled}
           disabled={!tracks.length}
         >
-          <Shuffle color={COLORS.text.primary} size={20} />
+          <Shuffle color={COLORS.text.primary} size={18} />
           <Text style={styles.secondaryActionText}>Shuffle</Text>
         </TouchableOpacity>
-
         <TouchableOpacity
           style={[styles.iconAction, !tracks.length && styles.actionDisabled]}
-          activeOpacity={0.85}
           onPress={queueAll}
           disabled={!tracks.length}
         >
           <ListPlus color={COLORS.text.primary} size={20} />
         </TouchableOpacity>
+        {canReorder && (
+          <TouchableOpacity
+            style={[styles.iconAction, reorderMode && styles.reorderActive]}
+            onPress={toggleReorder}
+          >
+            {reorderMode ? (
+              <Check color={COLORS.accent.green} size={20} />
+            ) : (
+              <ListOrdered color={COLORS.text.primary} size={20} />
+            )}
+          </TouchableOpacity>
+        )}
       </View>
+      {reorderMode && (
+        <Text style={styles.reorderHint}>
+          Grip long-press karke upar/neeche drag karo
+        </Text>
+      )}
     </View>
   );
 
   return (
     <View style={styles.container}>
-      <FlatList
+      <TouchableOpacity
+        style={[styles.backButton, { top: insets.top + 8 }]}
+        onPress={() => {
+          if (reorderMode) setReorderMode(false);
+          else navigation.goBack();
+        }}
+      >
+        <ChevronLeft color={COLORS.text.primary} size={24} />
+      </TouchableOpacity>
+
+      <DraggableFlatList
         data={tracks}
         keyExtractor={(item) => item.id}
+        onDragEnd={onDragEnd}
         renderItem={renderItem}
         ListHeaderComponent={header}
         ListEmptyComponent={
-          <GlassCard intensity={20} style={styles.emptyCard}>
-            <Text style={styles.emptyText}>
-              {playlist.id === 'liked'
-                ? 'Tap the heart on a track to save it here.'
-                : 'This playlist is empty.'}
-            </Text>
+          <GlassCard style={styles.emptyCard}>
+            <Text style={styles.emptyText}>No songs in this playlist yet.</Text>
           </GlassCard>
         }
         contentContainerStyle={{
-          paddingTop: insets.top + SIZES.xxl,
-          paddingBottom: SIZES.bottomInset,
+          paddingBottom: currentTrack ? 100 : insets.bottom + 24,
         }}
-        showsVerticalScrollIndicator={false}
-        initialNumToRender={12}
-        windowSize={9}
-        removeClippedSubviews
+        activationDistance={reorderMode ? 10 : 10000}
+        dragItemOverflow
       />
-
-      <TouchableOpacity
-        onPress={() => navigation.goBack()}
-        style={[styles.backButton, { top: insets.top + SIZES.sm }]}
-        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-      >
-        <ChevronLeft color={COLORS.text.primary} size={28} />
-      </TouchableOpacity>
 
       <AddToPlaylistSheet track={addingTrack} onClose={() => setAddingTrack(null)} />
 
@@ -289,8 +365,39 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.glassBorder,
   },
+  reorderActive: {
+    borderColor: COLORS.accent.green,
+    backgroundColor: 'rgba(29,185,84,0.15)',
+  },
+  reorderHint: {
+    marginTop: SIZES.md,
+    fontFamily: FONTS.regular,
+    fontSize: 12,
+    color: COLORS.accent.green,
+  },
   actionDisabled: {
     opacity: 0.4,
+  },
+  rowWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+  },
+  rowActive: {
+    backgroundColor: COLORS.surfaceRaised,
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  grip: {
+    paddingLeft: SIZES.sm,
+    paddingRight: 2,
+    justifyContent: 'center',
+  },
+  rowFlex: {
+    flex: 1,
   },
   emptyCard: {
     marginHorizontal: SIZES.md,
