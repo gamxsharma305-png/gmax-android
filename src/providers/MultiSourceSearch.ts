@@ -1,6 +1,6 @@
 /**
  * Website-parity search: Saavn + Audius + iTunes + YouTube Music.
- * Saavn / Audius / iTunes return tracks WITH audioUrl → true background play.
+ * Merge order: YouTube first, then stream-ready Saavn/Audius, then iTunes previews.
  */
 import { fetchJson } from '../core/http';
 import {
@@ -66,7 +66,7 @@ async function searchSaavn(query: string, limit: number, signal?: AbortSignal): 
   for (const base of SAAVN_ENDPOINTS) {
     try {
       const data = await fetchJson<any>(`${base}?query=${encodeURIComponent(query)}&limit=${limit}`, {
-        timeoutMs: 10_000,
+        timeoutMs: 5_000,
         retries: 0,
         signal,
       });
@@ -115,7 +115,7 @@ async function searchAudius(query: string, limit: number, signal?: AbortSignal):
   try {
     const data = await fetchJson<any>(
       `https://discoveryprovider.audius.co/v1/tracks/search?query=${encodeURIComponent(query)}&app_name=${APP}&limit=${limit}`,
-      { timeoutMs: 10_000, retries: 0, signal }
+      { timeoutMs: 5_000, retries: 0, signal }
     );
     const list = data?.data || [];
     if (!Array.isArray(list)) return [];
@@ -144,7 +144,7 @@ async function searchItunes(query: string, limit: number, signal?: AbortSignal):
   try {
     const data = await fetchJson<any>(
       `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=music&entity=song&limit=${limit}`,
-      { timeoutMs: 10_000, retries: 0, signal }
+      { timeoutMs: 5_000, retries: 0, signal }
     );
     const results = data?.results || [];
     const out: Track[] = [];
@@ -161,7 +161,7 @@ async function searchItunes(query: string, limit: number, signal?: AbortSignal):
         },
         albumImageUrl: upscaleItunesArt(item.artworkUrl100 || item.artworkUrl60 || ''),
         duration: item.trackTimeMillis ? item.trackTimeMillis / 1000 : 30,
-        audioUrl: item.previewUrl, // 30s preview — still real background audio
+        audioUrl: item.previewUrl,
         provider: 'itunes',
         sourceId: id,
         album: item.collectionName,
@@ -175,7 +175,7 @@ async function searchItunes(query: string, limit: number, signal?: AbortSignal):
 }
 
 /**
- * Merge like website: stream-ready sources first, then YouTube results from caller.
+ * Merge: YouTube first, then stream-ready Saavn/Audius, then iTunes previews.
  */
 export async function multiSourceSearch(
   query: string,
@@ -193,17 +193,16 @@ export async function multiSourceSearch(
     searchItunes(q, half, options.signal),
   ]);
 
-  // Prefer tracks that already have a stream (background-capable)
+  const youtube = options.youtubeTracks ?? [];
   const withStream = [
     ...saavn.filter((t) => t.audioUrl),
     ...audius.filter((t) => t.audioUrl),
   ];
   const previews = itunes.filter((t) => t.audioUrl);
-  const youtube = options.youtubeTracks ?? [];
 
   const seen = new Set<string>();
   const tracks: Track[] = [];
-  for (const t of [...withStream, ...youtube, ...previews]) {
+  for (const t of [...youtube, ...withStream, ...previews]) {
     const key = `${t.title.toLowerCase()}|${t.artist.name.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
