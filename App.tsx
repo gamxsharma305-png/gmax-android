@@ -1,42 +1,32 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import * as SystemUI from 'expo-system-ui';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { RootNavigator } from './src/navigation/RootNavigator';
-import { PlayerProvider } from './src/hooks/usePlayer';
 import { LibraryProvider } from './src/hooks/useLibrary';
-import { COLORS } from './src/constants/theme';
-import { GSplash } from './src/components/GSplash';
+import { ThemeProvider } from './src/theme/ThemeContext';
+import { PlayerProvider } from './src/hooks/usePlayer';
+import { RootNavigator } from './src/navigation/RootNavigator';
 import { YouTubeHost } from './src/player/YouTubeHost';
+import { GSplash } from './src/components/GSplash';
 import { UpdateModal } from './src/components/UpdateModal';
-import { checkForUpdate, UpdateInfo } from './src/services/UpdateService';
-import { getPlatformInfo, isNoteNativeAvailable } from './modules/note-native';
+import { COLORS } from './src/constants/theme';
+import { checkForUpdate, RemoteUpdate } from './src/services/UpdateService';
+import Constants from 'expo-constants';
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
-  const [updateRemote, setUpdateRemote] = useState<UpdateInfo | null>(null);
-  const [localVersion, setLocalVersion] = useState('');
   const [showUpdate, setShowUpdate] = useState(false);
+  const [updateRemote, setUpdateRemote] = useState<RemoteUpdate | null>(null);
+  const localVersion =
+    Constants.expoConfig?.version ||
+    Constants.nativeAppVersion ||
+    '1.0.0';
 
   useEffect(() => {
-    void SystemUI.setBackgroundColorAsync('#050707');
-
-    if (__DEV__) {
-      console.log(
-        '[NoteNative] available:',
-        isNoteNativeAvailable(),
-        'getPlatformInfo():',
-        getPlatformInfo()
-      );
-    }
-
-    // Check update after short delay (don't block splash)
     const t = setTimeout(() => {
       void (async () => {
-        const result = await checkForUpdate();
-        setLocalVersion(`${result.localVersion} (${result.localCode})`);
-        if (result.available && result.remote) {
+        const result = await checkForUpdate(localVersion);
+        if (result.updateAvailable && result.remote) {
           setUpdateRemote(result.remote);
           setShowUpdate(true);
         }
@@ -48,24 +38,26 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <LibraryProvider>
-        <PlayerProvider>
-          <View style={styles.webWrapper}>
-            <View style={styles.appContainer}>
-              <RootNavigator />
-              <YouTubeHost />
-              <StatusBar style="light" backgroundColor="#050707" />
-              {showSplash ? <GSplash onDone={() => setShowSplash(false)} /> : null}
-              {updateRemote ? (
-                <UpdateModal
-                  visible={showUpdate}
-                  remote={updateRemote}
-                  localVersion={localVersion}
-                  onClose={() => setShowUpdate(false)}
-                />
-              ) : null}
+        <ThemeProvider>
+          <PlayerProvider>
+            <View style={styles.webWrapper}>
+              <View style={styles.appContainer}>
+                <RootNavigator />
+                <YouTubeHost />
+                <StatusBar style="light" backgroundColor="#050707" />
+                {showSplash ? <GSplash onDone={() => setShowSplash(false)} /> : null}
+                {updateRemote ? (
+                  <UpdateModal
+                    visible={showUpdate}
+                    remote={updateRemote}
+                    localVersion={localVersion}
+                    onClose={() => setShowUpdate(false)}
+                  />
+                ) : null}
+              </View>
             </View>
-          </View>
-        </PlayerProvider>
+          </PlayerProvider>
+        </ThemeProvider>
       </LibraryProvider>
     </SafeAreaProvider>
   );
