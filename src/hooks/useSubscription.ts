@@ -45,6 +45,10 @@ export function useSubscription() {
     return result;
   }, []);
 
+  const requestAroKey = useCallback(async () => {
+    return SubscriptionService.requestAroKey();
+  }, []);
+
   return {
     ready,
     isPremium: state.active && state.expiresAt > Date.now(),
@@ -59,6 +63,7 @@ export function useSubscription() {
     canCreatePlaylist: (count: number) => SubscriptionService.canCreatePlaylist(count),
     claimWithPaymentId,
     redeemPromoCode,
+    requestAroKey,
     refresh,
     clear,
   };

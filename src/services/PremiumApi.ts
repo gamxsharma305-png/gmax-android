@@ -83,3 +83,74 @@ export async function fetchPremiumStatus(deviceId: string): Promise<StatusResult
     return { active: false, error: e instanceof Error ? e.message : 'Network error' };
   }
 }
+
+export type GetKeyResult = {
+  ok: boolean;
+  shortUrl?: string;
+  fallbackUrl?: string;
+  days?: number;
+  error?: string;
+};
+
+export type VerifyKeyResult = {
+  ok: boolean;
+  until?: number;
+  days?: number;
+  hours?: number;
+  plan?: string;
+  error?: string;
+};
+
+/** AroLinks Get Key — returns shortUrl only (code after ads). */
+export async function getAroKey(deviceId: string): Promise<GetKeyResult> {
+  const root = baseUrl();
+  if (!root) return { ok: false, error: 'Premium API not configured' };
+  try {
+    const res = await fetch(`${root}/api/get-key`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceId }),
+    });
+    const data = (await res.json().catch(() => ({}))) as GetKeyResult;
+    if (!res.ok) return { ok: false, error: data.error || `HTTP ${res.status}`, fallbackUrl: data.fallbackUrl };
+    return {
+      ok: !!data.ok,
+      shortUrl: data.shortUrl,
+      fallbackUrl: data.fallbackUrl,
+      days: data.days ?? 15,
+      error: data.error,
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error' };
+  }
+}
+
+/** Verify 12-digit AroLinks code → 15 days device unlock. */
+export async function verifyAroKey(code: string, deviceId: string): Promise<VerifyKeyResult> {
+  const root = baseUrl();
+  if (!root) return { ok: false, error: 'Premium API not configured' };
+  const digits = code.replace(/\D/g, '');
+  if (!/^\d{12}$/.test(digits)) {
+    return { ok: false, error: '12-digit code chahiye' };
+  }
+  try {
+    const res = await fetch(`${root}/api/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: digits, deviceId }),
+    });
+    const data = (await res.json().catch(() => ({}))) as VerifyKeyResult;
+    if (res.status === 429) return { ok: false, error: data.error || 'Too many requests' };
+    if (!res.ok) return { ok: false, error: data.error || `HTTP ${res.status}` };
+    return {
+      ok: !!data.ok,
+      until: data.until,
+      days: data.days ?? 15,
+      hours: data.hours,
+      plan: data.plan,
+      error: data.error,
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error' };
+  }
+}
