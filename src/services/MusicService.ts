@@ -1,6 +1,8 @@
 import { metadataCache } from '../core/cache';
 import { appError, toAppError } from '../core/errors';
 import {
+  Album,
+  ArtistResult,
   emptySearchResults,
   ResolvedStream,
   SearchFilter,
@@ -47,46 +49,138 @@ class MusicServiceImpl {
     const q = query.trim();
     if (!q) return emptySearchResults();
 
-    const limit = options.limit ?? 30;
-    // Fetch more YouTube so top of list is YT-heavy
-    const ytLimit = Math.min(24, Math.max(14, Math.ceil(limit * 0.75)));
+    const limit = options.limit ?? 40;
+    const filter = options.filter ?? 'All';
+    const ytLimit = Math.min(30, Math.max(16, Math.ceil(limit * 0.8)));
+    const signal = options.signal;
 
-    // Parallel: YouTube Innertube + Saavn/Audius/iTunes
-    const ytPromise = providers.default
-      .search(q, { ...options, limit: ytLimit })
-      .then((yt) => yt.tracks || [])
-      .catch(() => [] as Track[]);
+    const ytMainPromise = providers.default
+      .search(q, { filter, limit: ytLimit, signal })
+      .catch(() => emptySearchResults(q));
 
-    const otherPromise = multiSourceSearch(q, {
-      limit,
-      signal: options.signal,
-      youtubeTracks: [],
-    }).catch(() => null);
+    const needArtists = filter === 'All' || filter === 'Artists';
+    const needAlbums = filter === 'All' || filter === 'Albums';
 
-    const [youtubeTracks, other] = await Promise.all([ytPromise, otherPromise]);
+    const ytArtistsPromise = needArtists
+      ? providers.default
+          .search(q, { filter: 'Artists', limit: 12, signal })
+          .catch(() => emptySearchResults(q))
+      : Promise.resolve(emptySearchResults(q));
 
-    // Manual merge: YouTube first, then other sources (dedupe)
-    const seen = new Set<string>();
+    const ytAlbumsPromise = needAlbums
+      ? providers.default
+          .search(q, { filter: 'Albums', limit: 12, signal })
+          .catch(() => emptySearchResults(q))
+      : Promise.resolve(emptySearchResults(q));
+
+    const otherPromise = (async () => {
+      try {
+        return await Promise.race([
+          multiSourceSearch(q, { limit, signal, youtubeTracks: [] }),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500)),
+        ]);
+      } catch {
+        return null;
+      }
+    })();
+
+    const [ytMain, ytArtists, ytAlbums, other] = await Promise.all([
+      ytMainPromise,
+      ytArtistsPromise,
+      ytAlbumsPromise,
+      otherPromise,
+    ]);
+
+    const seenTrack = new Set<string>();
     const tracks: Track[] = [];
-    for (const t of [...youtubeTracks, ...(other?.tracks ?? [])]) {
+    for (const t of [...(ytMain.tracks || []), ...(other?.tracks ?? [])]) {
       const key = `${(t.title || '').toLowerCase()}|${(t.artist?.name || '').toLowerCase()}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+      if (seenTrack.has(key)) continue;
+      seenTrack.add(key);
       tracks.push(t);
       if (tracks.length >= limit) break;
     }
 
-    if (!tracks.length) {
+    const seenArtist = new Set<string>();
+    const artists: ArtistResult[] = [];
+    for (const a of [...(ytArtists.artists || []), ...(ytMain.artists || [])]) {
+      const key = (a.browseId || a.id || a.name || '').toLowerCase();
+      if (!key || seenArtist.has(key)) continue;
+      seenArtist.add(key);
+      artists.push(a);
+      if (artists.length >= 12) break;
+    }
+
+    const seenAlbum = new Set<string>();
+    const albums: Album[] = [];
+    for (const a of [...(ytAlbums.albums || []), ...(ytMain.albums || [])]) {
+      const key = (a.browseId || a.id || a.title || '').toLowerCase();
+      if (!key || seenAlbum.has(key)) continue;
+      seenAlbum.add(key);
+      albums.push(a);
+      if (albums.length >= 12) break;
+    }
+
+    const playlists = (ytMain.playlists || []).slice(0, 8);
+
+    if (!tracks.length && !artists.length && !albums.length && !playlists.length) {
       throw toAppError(new Error('No results'), 'search_failed');
     }
 
     return {
       query: q,
       tracks,
-      artists: other?.artists ?? [],
-      albums: other?.albums ?? [],
-      playlists: other?.playlists ?? [],
+      artists,
+      albums,
+      playlists,
     };
+  }
+
+  async loadArtistCatalog(
+    artist: { name: string; browseId?: string },
+    options: { signal?: AbortSignal; maxTracks?: number } = {}
+  ): Promise<Track[]> {
+    const max = options.maxTracks ?? 150;
+    const signal = options.signal;
+    const seen = new Set<string>();
+    const out: Track[] = [];
+
+    const push = (list: Track[]) => {
+      for (const t of list) {
+        if (seen.has(t.id)) continue;
+        seen.add(t.id);
+        out.push(t);
+        if (out.length >= max) return true;
+      }
+      return false;
+    };
+
+    if (artist.browseId) {
+      try {
+        const page = await this.getArtistTracks(artist.browseId, signal);
+        if (push(page)) return out;
+      } catch {
+        /* fall through */
+      }
+    }
+
+    const name = (artist.name || '').trim();
+    if (name) {
+      for (const q of [`${name} songs`, name]) {
+        try {
+          const res = await providers.default.search(q, {
+            filter: 'Songs',
+            limit: 40,
+            signal,
+          });
+          if (push(res.tracks || [])) return out;
+        } catch {
+          /* next */
+        }
+      }
+    }
+
+    return out;
   }
 
   async getSuggestions(input: string, signal?: AbortSignal): Promise<string[]> {
@@ -172,10 +266,6 @@ class MusicServiceImpl {
     return streamResolver.resolve(track, signal);
   }
 
-  /**
-   * Ensure YouTube video id for offline.
-   * Same track if already YouTube; else search YouTube for title+artist.
-   */
   async resolveYouTubeTrackForOffline(
     track: Track,
     signal?: AbortSignal
@@ -196,12 +286,6 @@ class MusicServiceImpl {
     return hit;
   }
 
-  /**
-   * Offline = YouTube only (Musify / youtube_explode pattern).
-   * NewPipe progressive audio → same video id.
-   * Fallback: Invidious endpoints only.
-   * NEVER TitleMatch / Saavn / Audius swap.
-   */
   async resolveStreamForOffline(track: Track, signal?: AbortSignal): Promise<ResolvedStream> {
     if (track.localUri) {
       return {
@@ -216,7 +300,6 @@ class MusicServiceImpl {
     const ytTrack = await this.resolveYouTubeTrackForOffline(track, signal);
     if (signal?.aborted) throw appError('timeout');
 
-    // 1) NewPipe — progressive HTTP audio of THIS YouTube video (Musify-style)
     if (nativeYt.canHandle(ytTrack)) {
       try {
         const native = await nativeYt.resolve(ytTrack, signal);
@@ -226,7 +309,6 @@ class MusicServiceImpl {
       }
     }
 
-    // 2) Invidious adaptive audio — same sourceId only
     if (endpointSource.canHandle(ytTrack)) {
       try {
         return await endpointSource.resolve(ytTrack, signal);
