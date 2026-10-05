@@ -11,7 +11,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, FONTS, SIZES } from '../constants/theme';
 import {
   UpdateInfo,
-  downloadAndInstallApk,
   openApkInBrowser,
 } from '../services/UpdateService';
 
@@ -25,10 +24,10 @@ type Props = {
 export function UpdateModal({ visible, remote, localVersion, onClose }: Props) {
   const insets = useSafeAreaInsets();
   const [busy, setBusy] = useState(false);
-  const [percent, setPercent] = useState(0);
   const [err, setErr] = useState<string | null>(null);
   const [hint, setHint] = useState<string | null>(null);
 
+  /** Primary path: open APK URL in system browser — most reliable, no parse errors */
   const onUpdate = useCallback(async () => {
     if (!remote.apkUrl) {
       setErr('APK link missing');
@@ -37,19 +36,15 @@ export function UpdateModal({ visible, remote, localVersion, onClose }: Props) {
     setBusy(true);
     setErr(null);
     setHint(null);
-    setPercent(0);
-    const result = await downloadAndInstallApk(remote.apkUrl, (p) => setPercent(p.percent));
-    setBusy(false);
-    if (!result.ok) {
-      setErr(result.error || 'Update failed');
-      return;
-    }
-    if (result.usedBrowser) {
+    try {
+      await openApkInBrowser(remote.apkUrl);
       setHint(
-        'Browser/Downloads me APK open hua. Install → Allow unknown apps → Install.'
+        'Browser me APK download ho raha hai.\nDownload khatam → Files/Downloads se open → Install.'
       );
-    } else {
-      setHint('Install screen open hona chahiye. Agar error aaye to neeche Browser use karo.');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Browser open nahi hua');
+    } finally {
+      setBusy(false);
     }
   }, [remote.apkUrl]);
 
@@ -69,16 +64,16 @@ export function UpdateModal({ visible, remote, localVersion, onClose }: Props) {
       <View style={styles.backdrop}>
         <View style={[styles.card, { marginBottom: insets.bottom + 16 }]}>
           <Text style={styles.badge}>UPDATE</Text>
-          <Text style={styles.title}>Please update</Text>
+          <Text style={styles.title}>Naya update available</Text>
           <Text style={styles.sub}>
-            New version {remote.version} available.{'\n'}You have {localVersion}.
+            Version {remote.version} ready.{'\n'}Aapka version: {localVersion}
           </Text>
           {!!remote.notes && <Text style={styles.notes}>{remote.notes}</Text>}
 
           {busy && (
             <View style={styles.progressRow}>
               <ActivityIndicator color={COLORS.accent.green} />
-              <Text style={styles.progressText}>Downloading… {percent}%</Text>
+              <Text style={styles.progressText}>Browser khol rahe hain…</Text>
             </View>
           )}
 
@@ -91,7 +86,9 @@ export function UpdateModal({ visible, remote, localVersion, onClose }: Props) {
             disabled={busy}
             activeOpacity={0.85}
           >
-            <Text style={styles.primaryText}>{busy ? 'Please wait…' : 'Update now'}</Text>
+            <Text style={styles.primaryText}>
+              {busy ? 'Please wait…' : 'Update — Browser me download'}
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -100,7 +97,7 @@ export function UpdateModal({ visible, remote, localVersion, onClose }: Props) {
             disabled={busy}
             activeOpacity={0.85}
           >
-            <Text style={styles.browserText}>Open in browser (if install fails)</Text>
+            <Text style={styles.browserText}>Link dubara browser me kholo</Text>
           </TouchableOpacity>
 
           {!remote.force && (

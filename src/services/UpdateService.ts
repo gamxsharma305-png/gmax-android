@@ -59,11 +59,19 @@ try {
 
 function currentVersionCode(): number {
   const android = Constants.expoConfig?.android as { versionCode?: number } | undefined;
-  return Number(android?.versionCode) || 0;
+  const fromConfig = Number(android?.versionCode) || 0;
+  if (fromConfig > 0) return fromConfig;
+  // Fallback: native build number (some Expo embeds)
+  const native = Number(Constants.nativeBuildVersion) || 0;
+  return native > 0 ? native : 0;
 }
 
 function currentVersionName(): string {
-  return Constants.expoConfig?.version || '0.0.0';
+  return (
+    Constants.expoConfig?.version ||
+    Constants.nativeAppVersion ||
+    '0.0.0'
+  );
 }
 
 export async function checkForUpdate(_legacyVersionArg?: string): Promise<{
@@ -127,96 +135,15 @@ export async function downloadAndInstallApk(
     return { ok: true, usedBrowser: true };
   }
 
-  // Primary reliable path for MIUI / realme / Oppo: system download
-  // (in-app content:// install often shows "problem parsing the package")
+  // Always prefer browser for reliability (user request — no parse errors)
   try {
-    if (!FileSystem?.cacheDirectory) {
-      await Linking.openURL(apkUrl);
-      return { ok: true, usedBrowser: true };
-    }
-
-    const dest = `${FileSystem.cacheDirectory}gmax-update.apk`;
-    try {
-      await FileSystem.deleteAsync(dest, { idempotent: true });
-    } catch {
-      /* ok */
-    }
-
-    let downloaded = false;
-
-    if (FileSystem.createDownloadResumable) {
-      const task = FileSystem.createDownloadResumable(
-        apkUrl,
-        dest,
-        {
-          headers: {
-            Accept: 'application/vnd.android.package-archive,*/*',
-          },
-        },
-        (p) => {
-          const total = p.totalBytesExpectedToWrite || 1;
-          const written = p.totalBytesWritten || 0;
-          onProgress?.({
-            percent: Math.min(100, Math.round((written / total) * 100)),
-            written,
-            total,
-          });
-        }
-      );
-      const result = await task.downloadAsync();
-      downloaded = !!result?.uri;
-    } else {
-      const result = await FileSystem.downloadAsync(apkUrl, dest, {
-        headers: { Accept: 'application/vnd.android.package-archive,*/*' },
-      });
-      downloaded = result.status >= 200 && result.status < 300;
-      onProgress?.({ percent: 100, written: 1, total: 1 });
-    }
-
-    if (downloaded) {
-      const info = await FileSystem.getInfoAsync(dest);
-      const size = info.size ?? 0;
-
-      // Corrupt / HTML error page / truncated
-      if (!info.exists || size < MIN_APK_BYTES) {
-        try {
-          await FileSystem.deleteAsync(dest, { idempotent: true });
-        } catch {
-          /* ok */
-        }
-        await Linking.openURL(apkUrl);
-        return {
-          ok: true,
-          usedBrowser: true,
-          error:
-            'Downloaded file too small — opened browser. Install from Downloads.',
-        };
-      }
-
-      // Try content URI install
-      if (FileSystem.getContentUriAsync) {
-        try {
-          const contentUri = await FileSystem.getContentUriAsync(dest);
-          await Linking.openURL(contentUri);
-          return { ok: true };
-        } catch {
-          /* fall through to browser */
-        }
-      }
-    }
-
     await Linking.openURL(apkUrl);
     return { ok: true, usedBrowser: true };
   } catch (e) {
-    try {
-      await Linking.openURL(apkUrl);
-      return { ok: true, usedBrowser: true };
-    } catch {
-      return {
-        ok: false,
-        error: e instanceof Error ? e.message : 'Update failed',
-      };
-    }
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : 'Update failed',
+    };
   }
 }
 
