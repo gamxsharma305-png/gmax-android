@@ -1,7 +1,7 @@
 {
-  "version": "1.2.4",
-  "versionCode": 39,
-  "apkUrl": "",
+  "version": "1.2.8",
+  "versionCode": 44,
+  "apkUrl": "https://github.com/gamxsharma305-png/gmax-android/releases/download/1.2.8/application-8e6ee8c0-9325-4dfc-a3c9-ce30a02276a0.apk",
   "force": false,
-  "notes": "Stable install profile (versionCode 39). Features ship in same version."
+  "notes": "Deep search (150–200 results) • Working accent/theme colors • AroLinks Get Key fix • Offline + playlist improvements"
 }
