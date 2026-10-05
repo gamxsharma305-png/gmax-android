@@ -66,8 +66,10 @@ function currentVersionName(): string {
   return Constants.expoConfig?.version || '0.0.0';
 }
 
-export async function checkForUpdate(): Promise<{
+export async function checkForUpdate(_legacyVersionArg?: string): Promise<{
   available: boolean;
+  /** @deprecated use `available` — kept so older App.tsx still works if any */
+  updateAvailable: boolean;
   remote?: UpdateInfo;
   localVersion: string;
   localCode: number;
@@ -77,20 +79,26 @@ export async function checkForUpdate(): Promise<{
 
   try {
     const res = await fetch(`${UPDATE_MANIFEST_URL}?t=${Date.now()}`, {
-      headers: { 'Cache-Control': 'no-cache' },
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        Pragma: 'no-cache',
+      },
     });
     if (!res.ok) {
-      return { available: false, localVersion, localCode };
+      return { available: false, updateAvailable: false, localVersion, localCode };
     }
     const remote = (await res.json()) as UpdateInfo;
     const remoteCode = Number(remote.versionCode) || 0;
     const hasApk = typeof remote.apkUrl === 'string' && remote.apkUrl.startsWith('http');
     const available = remoteCode > localCode && hasApk;
-    return { available, remote, localVersion, localCode };
+    return { available, updateAvailable: available, remote, localVersion, localCode };
   } catch {
-    return { available: false, localVersion, localCode };
+    return { available: false, updateAvailable: false, localVersion, localCode };
   }
 }
+
+/** Alias for older imports */
+export type RemoteUpdate = UpdateInfo;
 
 export type DownloadProgress = {
   percent: number;

@@ -11,13 +11,13 @@ import { YouTubeHost } from './src/player/YouTubeHost';
 import { GSplash } from './src/components/GSplash';
 import { UpdateModal } from './src/components/UpdateModal';
 import { COLORS } from './src/constants/theme';
-import { checkForUpdate, RemoteUpdate } from './src/services/UpdateService';
+import { checkForUpdate, UpdateInfo } from './src/services/UpdateService';
 import Constants from 'expo-constants';
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
   const [showUpdate, setShowUpdate] = useState(false);
-  const [updateRemote, setUpdateRemote] = useState<RemoteUpdate | null>(null);
+  const [updateRemote, setUpdateRemote] = useState<UpdateInfo | null>(null);
   const localVersion =
     Constants.expoConfig?.version ||
     Constants.nativeAppVersion ||
@@ -26,13 +26,17 @@ export default function App() {
   useEffect(() => {
     const t = setTimeout(() => {
       void (async () => {
-        const result = await checkForUpdate(localVersion);
-        if (result.updateAvailable && result.remote) {
-          setUpdateRemote(result.remote);
-          setShowUpdate(true);
+        try {
+          const result = await checkForUpdate();
+          if (result.available && result.remote) {
+            setUpdateRemote(result.remote);
+            setShowUpdate(true);
+          }
+        } catch {
+          // network / parse — silent
         }
       })();
-    }, 2500);
+    }, 1800);
     return () => clearTimeout(t);
   }, []);
 
