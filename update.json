@@ -1,7 +1,7 @@
 {
-  "version": "1.2.7",
-  "versionCode": 42,
-  "apkUrl": "https://github.com/gamxsharma305-png/gmax-android/releases/download/1.2.7/application-5fdc2aba-6041-42a6-9ca5-30acaae1e236.apk",
+  "version": "1.2.4",
+  "versionCode": 39,
+  "apkUrl": "",
   "force": false,
-  "notes": "YouTube search pehle + faster • Spotify import Premium/AroLinks only • Offline playback fix • Playlist drag reorder"
+  "notes": "Stable install profile (versionCode 39). Features ship in same version."
 }

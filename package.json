@@ -1,6 +1,6 @@
 {
   "name": "gmax-android",
-  "version": "1.2.8",
+  "version": "1.2.4",
   "main": "index.ts",
   "dependencies": {
     "@expo/metro-runtime": "~57.0.16",
