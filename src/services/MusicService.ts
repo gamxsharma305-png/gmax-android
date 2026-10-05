@@ -20,7 +20,6 @@ providers.register(youtubeResolver, true);
 const OFFLINE_TTL = 4 * 60 * 60 * 1000;
 const nativeYt = new NativeStreamSource();
 
-/** Public Invidious instances for offline YouTube audio fallback */
 const DEFAULT_INVIDIOUS = [
   'https://inv.nadeko.net',
   'https://invidious.fdn.fr',
@@ -49,9 +48,9 @@ class MusicServiceImpl {
     const q = query.trim();
     if (!q) return emptySearchResults();
 
-    const limit = options.limit ?? 40;
+    const limit = options.limit ?? 150;
     const filter = options.filter ?? 'All';
-    const ytLimit = Math.min(30, Math.max(16, Math.ceil(limit * 0.8)));
+    const ytLimit = Math.min(200, Math.max(40, limit));
     const signal = options.signal;
 
     const ytMainPromise = providers.default
@@ -63,13 +62,13 @@ class MusicServiceImpl {
 
     const ytArtistsPromise = needArtists
       ? providers.default
-          .search(q, { filter: 'Artists', limit: 12, signal })
+          .search(q, { filter: 'Artists', limit: 20, signal })
           .catch(() => emptySearchResults(q))
       : Promise.resolve(emptySearchResults(q));
 
     const ytAlbumsPromise = needAlbums
       ? providers.default
-          .search(q, { filter: 'Albums', limit: 12, signal })
+          .search(q, { filter: 'Albums', limit: 20, signal })
           .catch(() => emptySearchResults(q))
       : Promise.resolve(emptySearchResults(q));
 
@@ -108,7 +107,7 @@ class MusicServiceImpl {
       if (!key || seenArtist.has(key)) continue;
       seenArtist.add(key);
       artists.push(a);
-      if (artists.length >= 12) break;
+      if (artists.length >= 24) break;
     }
 
     const seenAlbum = new Set<string>();
@@ -118,7 +117,7 @@ class MusicServiceImpl {
       if (!key || seenAlbum.has(key)) continue;
       seenAlbum.add(key);
       albums.push(a);
-      if (albums.length >= 12) break;
+      if (albums.length >= 24) break;
     }
 
     const playlists = (ytMain.playlists || []).slice(0, 8);
@@ -127,20 +126,14 @@ class MusicServiceImpl {
       throw toAppError(new Error('No results'), 'search_failed');
     }
 
-    return {
-      query: q,
-      tracks,
-      artists,
-      albums,
-      playlists,
-    };
+    return { query: q, tracks, artists, albums, playlists };
   }
 
   async loadArtistCatalog(
     artist: { name: string; browseId?: string },
     options: { signal?: AbortSignal; maxTracks?: number } = {}
   ): Promise<Track[]> {
-    const max = options.maxTracks ?? 150;
+    const max = options.maxTracks ?? 200;
     const signal = options.signal;
     const seen = new Set<string>();
     const out: Track[] = [];
@@ -166,11 +159,11 @@ class MusicServiceImpl {
 
     const name = (artist.name || '').trim();
     if (name) {
-      for (const q of [`${name} songs`, name]) {
+      for (const q of [`${name} songs`, name, `${name} hits`, `${name} best`]) {
         try {
           const res = await providers.default.search(q, {
             filter: 'Songs',
-            limit: 40,
+            limit: 80,
             signal,
           });
           if (push(res.tracks || [])) return out;
@@ -270,9 +263,7 @@ class MusicServiceImpl {
     track: Track,
     signal?: AbortSignal
   ): Promise<Track> {
-    if (track.provider === 'youtube' && track.sourceId) {
-      return track;
-    }
+    if (track.provider === 'youtube' && track.sourceId) return track;
 
     const q = `${track.title} ${track.artist?.name || ''}`.trim();
     if (!q) throw appError('track_unavailable', 'No title to search on YouTube');
@@ -288,15 +279,10 @@ class MusicServiceImpl {
 
   async resolveStreamForOffline(track: Track, signal?: AbortSignal): Promise<ResolvedStream> {
     if (track.localUri) {
-      return {
-        url: track.localUri,
-        expiresAt: Date.now() + OFFLINE_TTL,
-        resolvedBy: 'local',
-      };
+      return { url: track.localUri, expiresAt: Date.now() + OFFLINE_TTL, resolvedBy: 'local' };
     }
 
     ensureYtEndpoints();
-
     const ytTrack = await this.resolveYouTubeTrackForOffline(track, signal);
     if (signal?.aborted) throw appError('timeout');
 
@@ -317,10 +303,7 @@ class MusicServiceImpl {
       }
     }
 
-    throw appError(
-      'source_unavailable',
-      'YouTube audio stream not available for offline download'
-    );
+    throw appError('source_unavailable', 'YouTube audio stream not available for offline download');
   }
 
   canPlay(track: Track): boolean {
