@@ -101,7 +101,7 @@ export type VerifyKeyResult = {
   error?: string;
 };
 
-/** AroLinks Get Key — returns shortUrl only (code after ads). */
+/** AroLinks Get Key — returns shortUrl only (code after ads). Always open in system browser. */
 export async function getAroKey(deviceId: string): Promise<GetKeyResult> {
   const root = baseUrl();
   if (!root) return { ok: false, error: 'Premium API not configured' };
@@ -111,10 +111,29 @@ export async function getAroKey(deviceId: string): Promise<GetKeyResult> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ deviceId }),
     });
-    const data = (await res.json().catch(() => ({}))) as GetKeyResult;
-    if (!res.ok) return { ok: false, error: data.error || `HTTP ${res.status}`, fallbackUrl: data.fallbackUrl };
+    const text = await res.text();
+    let data: GetKeyResult = {};
+    try {
+      data = JSON.parse(text) as GetKeyResult;
+    } catch {
+      /* HTML 404 page from Vercel */
+    }
+    if (res.status === 404) {
+      return {
+        ok: false,
+        error:
+          'Get Key API missing (404). Vercel pe api/get-key.js + api/verify.js deploy karo + AROLINKS_TOKEN set karo.',
+      };
+    }
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: data.error || `HTTP ${res.status}`,
+        fallbackUrl: data.fallbackUrl,
+      };
+    }
     return {
-      ok: !!data.ok,
+      ok: !!data.ok || !!(data.shortUrl || data.fallbackUrl),
       shortUrl: data.shortUrl,
       fallbackUrl: data.fallbackUrl,
       days: data.days ?? 15,
@@ -139,7 +158,19 @@ export async function verifyAroKey(code: string, deviceId: string): Promise<Veri
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code: digits, deviceId }),
     });
-    const data = (await res.json().catch(() => ({}))) as VerifyKeyResult;
+    const text = await res.text();
+    let data: VerifyKeyResult = {};
+    try {
+      data = JSON.parse(text) as VerifyKeyResult;
+    } catch {
+      /* non-JSON */
+    }
+    if (res.status === 404) {
+      return {
+        ok: false,
+        error: 'Verify API missing (404). Vercel pe api/verify.js deploy karo.',
+      };
+    }
     if (res.status === 429) return { ok: false, error: data.error || 'Too many requests' };
     if (!res.ok) return { ok: false, error: data.error || `HTTP ${res.status}` };
     return {
