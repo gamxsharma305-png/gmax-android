@@ -48,8 +48,8 @@ export class YouTubeResolver implements TrackResolver {
     if (!q) return emptySearchResults();
 
     const filter = options.filter ?? 'All';
-    const limit = options.limit ?? 20;
-    const cacheKey = `yt:search:${filter}:${q.toLowerCase()}`;
+    const limit = options.limit ?? 40;
+    const cacheKey = `yt:search:${filter}:${q.toLowerCase()}:L${limit}`;
 
     const cached = metadataCache.get<SearchResults>(cacheKey);
     if (cached) return cached;
@@ -57,8 +57,44 @@ export class YouTubeResolver implements TrackResolver {
     let results: SearchResults;
 
     try {
-      const response = await innertube.search(q, PARAMS_FOR_FILTER[filter], options.signal);
+      let response = await innertube.search(q, PARAMS_FOR_FILTER[filter], options.signal);
       results = this.parseSearchResponse(q, response, filter, limit);
+
+      let cont = findContinuation(response);
+      let pages = 0;
+      const maxPages = Math.min(8, Math.max(1, Math.ceil(limit / 20)));
+      while (
+        cont &&
+        pages < maxPages &&
+        results.tracks.length < limit &&
+        !options.signal?.aborted
+      ) {
+        pages++;
+        try {
+          response = await innertube.searchContinuation(cont, options.signal);
+          const more = this.parseSearchResponse(q, response, filter, limit);
+          const seen = new Set(results.tracks.map((t) => t.id));
+          for (const t of more.tracks) {
+            if (seen.has(t.id)) continue;
+            seen.add(t.id);
+            results.tracks.push(t);
+            if (results.tracks.length >= limit) break;
+          }
+          for (const a of more.artists) {
+            if (!results.artists.some((x) => x.id === a.id)) results.artists.push(a);
+          }
+          for (const a of more.albums) {
+            if (!results.albums.some((x) => x.id === a.id)) results.albums.push(a);
+          }
+          cont = findContinuation(response);
+        } catch {
+          break;
+        }
+      }
+
+      results.tracks = results.tracks.slice(0, limit);
+      results.artists = results.artists.slice(0, 40);
+      results.albums = results.albums.slice(0, 40);
     } catch (e) {
       const err = toAppError(e, 'search_failed');
       if (options.signal?.aborted) throw err;
