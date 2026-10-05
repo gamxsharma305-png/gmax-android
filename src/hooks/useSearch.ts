@@ -150,6 +150,10 @@ export function useSearch(): UseSearch {
     searchNow,
     retry,
     clear,
-    hasResults: results.tracks.length > 0,
+    hasResults:
+      results.tracks.length > 0 ||
+      results.artists.length > 0 ||
+      results.albums.length > 0 ||
+      results.playlists.length > 0,
   };
 }
