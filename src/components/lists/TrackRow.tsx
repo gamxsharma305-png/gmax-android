@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Image, TouchableOpacity, ActivityIndicator } fr
 import { MoreVertical } from 'lucide-react-native';
 import { Track } from '../../core/types';
 import { COLORS, SIZES, FONTS } from '../../constants/theme';
+import { useTheme } from '../../theme/ThemeContext';
 
 interface TrackRowProps {
   track: Track;
@@ -19,26 +20,23 @@ const TrackRowComponent: React.FC<TrackRowProps> = ({
   isLoading,
   onMorePress,
 }) => {
+  const { accent } = useTheme();
   const handlePress = useCallback(() => onPress(track), [onPress, track]);
-  const handleMorePress = useCallback(
-    () => onMorePress?.(track),
-    [onMorePress, track]
-  );
+  const handleMorePress = useCallback(() => onMorePress?.(track), [onMorePress, track]);
 
   return (
-    <TouchableOpacity
-      style={styles.container}
-      activeOpacity={0.7}
-      onPress={handlePress}
-    >
+    <TouchableOpacity style={styles.container} activeOpacity={0.7} onPress={handlePress}>
       <Image source={{ uri: track.albumImageUrl }} style={styles.image} />
 
       <View style={styles.infoContainer}>
-        <Text style={[styles.title, isPlaying && styles.playingTitle]} numberOfLines={1}>
+        <Text
+          style={[styles.title, isPlaying && { color: accent }]}
+          numberOfLines={1}
+        >
           {track.title}
         </Text>
         <Text style={styles.artist} numberOfLines={1}>
-          {track.artist.name}
+          {track.artist?.name || 'Unknown'}
         </Text>
       </View>
 
@@ -46,10 +44,12 @@ const TrackRowComponent: React.FC<TrackRowProps> = ({
         <View style={styles.moreButton}>
           <ActivityIndicator size="small" color={COLORS.text.secondary} />
         </View>
-      ) : (
-        <TouchableOpacity style={styles.moreButton} onPress={handleMorePress}>
-          <MoreVertical color={COLORS.text.secondary} size={20} />
+      ) : onMorePress ? (
+        <TouchableOpacity style={styles.moreButton} onPress={handleMorePress} hitSlop={12}>
+          <MoreVertical color={COLORS.text.secondary} size={18} />
         </TouchableOpacity>
+      ) : (
+        <View style={styles.moreButton} />
       )}
     </TouchableOpacity>
   );
@@ -61,35 +61,32 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: SIZES.sm,
     paddingHorizontal: SIZES.md,
+    paddingVertical: 10,
+    gap: 12,
   },
   image: {
-    width: 48,
-    height: 48,
-    borderRadius: SIZES.radius.sm,
-    backgroundColor: COLORS.surfaceLight,
+    width: 52,
+    height: 52,
+    borderRadius: 8,
+    backgroundColor: COLORS.surfaceRaised,
   },
-  infoContainer: {
-    flex: 1,
-    marginLeft: SIZES.md,
-    justifyContent: 'center',
-  },
+  infoContainer: { flex: 1 },
   title: {
     fontFamily: FONTS.medium,
-    fontSize: 16,
+    fontSize: 15,
     color: COLORS.text.primary,
-    marginBottom: 2,
-  },
-  playingTitle: {
-    color: COLORS.accent.green,
   },
   artist: {
     fontFamily: FONTS.regular,
-    fontSize: 14,
+    fontSize: 13,
     color: COLORS.text.secondary,
+    marginTop: 2,
   },
   moreButton: {
-    padding: SIZES.sm,
-  }
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

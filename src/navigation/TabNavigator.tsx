@@ -3,6 +3,7 @@ import { View, StyleSheet, Platform } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Home, Search, Library, Clock } from 'lucide-react-native';
 import { COLORS } from '../constants/theme';
+import { useTheme } from '../theme/ThemeContext';
 
 import HomeScreen from '../screens/Home';
 import SearchScreen from '../screens/Search';
@@ -12,14 +13,15 @@ import HistoryScreen from '../screens/History';
 const Tab = createBottomTabNavigator();
 
 export const TabNavigator = () => {
+  const { accent, colors } = useTheme();
   return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        tabBarStyle: styles.tabBar,
-        tabBarBackground: () => <View style={styles.tabBarBackground} />,
-        tabBarActiveTintColor: COLORS.text.primary,
-        tabBarInactiveTintColor: COLORS.text.secondary,
+        tabBarStyle: [styles.tabBar, { backgroundColor: colors.surfaceRaised }],
+        tabBarBackground: () => <View style={[styles.tabBarBackground, { backgroundColor: colors.surfaceRaised }]} />,
+        tabBarActiveTintColor: accent,
+        tabBarInactiveTintColor: colors.text.secondary,
         tabBarShowLabel: true,
         tabBarLabelStyle: styles.tabBarLabel,
       }}
@@ -44,16 +46,6 @@ export const TabNavigator = () => {
           ),
         }}
       />
-      <Tab.Screen
-        name="HistoryTab"
-        component={HistoryScreen}
-        options={{
-          tabBarLabel: 'History',
-          tabBarIcon: ({ color, focused }) => (
-            <Clock color={color} size={24} strokeWidth={focused ? 2.5 : 2} />
-          ),
-        }}
-      />
       <Tab.Screen 
         name="LibraryTab" 
         component={LibraryScreen} 
@@ -64,32 +56,36 @@ export const TabNavigator = () => {
           ),
         }}
       />
+      <Tab.Screen 
+        name="HistoryTab" 
+        component={HistoryScreen} 
+        options={{
+          tabBarLabel: 'History',
+          tabBarIcon: ({ color, focused }) => (
+            <Clock color={color} size={24} strokeWidth={focused ? 2.5 : 2} />
+          ),
+        }}
+      />
     </Tab.Navigator>
   );
 };
 
 const styles = StyleSheet.create({
-  tabBarBackground: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: COLORS.surfaceRaised,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: COLORS.hairline,
-  },
   tabBar: {
     position: 'absolute',
-    borderTopWidth: 0,
-    elevation: 0,
-    backgroundColor: 'transparent',
-    height: Platform.OS === 'ios' ? 88 : 68,
+    backgroundColor: COLORS.surfaceRaised,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.hairline,
+    height: Platform.OS === 'ios' ? 88 : 64,
     paddingBottom: Platform.OS === 'ios' ? 28 : 8,
     paddingTop: 8,
   },
+  tabBarBackground: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: COLORS.surfaceRaised,
+  },
   tabBarLabel: {
-    fontSize: 10,
-    marginTop: 4,
-  }
+    fontSize: 11,
+    fontWeight: '500',
+  },
 });
