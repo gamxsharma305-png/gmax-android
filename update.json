@@ -1,7 +1,8 @@
 {
   "version": "1.2.4",
-  "versionCode": 39,
-  "apkUrl": "",
+  "versionCode": 40,
+  "buildId": "8bd8dbe1-069c-4416-bb12-353d1cea1f51",
+  "apkUrl": "https://github.com/gamxsharma305-png/gmax-android/releases/download/1.2.8/application-8bd8dbe1-069c-4416-bb12-353d1cea1f51.apk",
   "force": false,
-  "notes": "Stable install profile (versionCode 39). Features ship in same version."
+  "notes": "Latest stable build — offline fix, faster song switch, search & theme. Install safe (display 1.2.4)."
 }
