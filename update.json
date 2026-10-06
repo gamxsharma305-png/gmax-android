@@ -1,7 +1,7 @@
 {
   "version": "1.2.4",
-  "versionCode": 45,
+  "versionCode": 39,
   "apkUrl": "",
   "force": false,
-  "notes": "version 1.2.4 display — versionCode 45 required for Android in-place update."
+  "notes": "Stable install profile (versionCode 39). Features ship in same version."
 }
