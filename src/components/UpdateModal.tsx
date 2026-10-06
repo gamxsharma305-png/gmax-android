@@ -12,6 +12,7 @@ import { COLORS, FONTS, SIZES } from '../constants/theme';
 import {
   UpdateInfo,
   openApkInBrowser,
+  markUpdateApplied,
 } from '../services/UpdateService';
 
 type Props = {
@@ -27,7 +28,6 @@ export function UpdateModal({ visible, remote, localVersion, onClose }: Props) {
   const [err, setErr] = useState<string | null>(null);
   const [hint, setHint] = useState<string | null>(null);
 
-  /** Primary path: open APK URL in system browser — most reliable, no parse errors */
   const onUpdate = useCallback(async () => {
     if (!remote.apkUrl) {
       setErr('APK link missing');
@@ -38,6 +38,7 @@ export function UpdateModal({ visible, remote, localVersion, onClose }: Props) {
     setHint(null);
     try {
       await openApkInBrowser(remote.apkUrl);
+      await markUpdateApplied(remote);
       setHint(
         'Browser me APK download ho raha hai.\nDownload khatam → Files/Downloads se open → Install.'
       );
@@ -46,18 +47,19 @@ export function UpdateModal({ visible, remote, localVersion, onClose }: Props) {
     } finally {
       setBusy(false);
     }
-  }, [remote.apkUrl]);
+  }, [remote]);
 
   const onBrowser = useCallback(async () => {
     if (!remote.apkUrl) return;
     setErr(null);
     try {
       await openApkInBrowser(remote.apkUrl);
+      await markUpdateApplied(remote);
       setHint('Browser me download → file open → Install.');
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not open link');
     }
-  }, [remote.apkUrl]);
+  }, [remote]);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -66,7 +68,7 @@ export function UpdateModal({ visible, remote, localVersion, onClose }: Props) {
           <Text style={styles.badge}>UPDATE</Text>
           <Text style={styles.title}>Naya update available</Text>
           <Text style={styles.sub}>
-            Version {remote.version} ready.{'\n'}Aapka version: {localVersion}
+            Version {remote.version} ready.{\n}Aapka version: {localVersion}
           </Text>
           {!!remote.notes && <Text style={styles.notes}>{remote.notes}</Text>}
 
@@ -105,6 +107,16 @@ export function UpdateModal({ visible, remote, localVersion, onClose }: Props) {
               <Text style={styles.secondaryText}>Later</Text>
             </TouchableOpacity>
           )}
+
+          <TouchableOpacity
+            style={styles.secondary}
+            disabled={busy}
+            onPress={() => {
+              void markUpdateApplied(remote).then(() => onClose());
+            }}
+          >
+            <Text style={styles.secondaryText}>Pehle se update ho chuka hai</Text>
+          </TouchableOpacity>
         </View>
       </View>
     </Modal>
