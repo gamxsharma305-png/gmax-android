@@ -31,7 +31,7 @@ import java.net.URL
 
 /**
  * Native YouTube via NewPipeExtractor.
- * Offline: Musify-style full pipe, prefer AAC/m4a so expo-audio can play local files.
+ * Offline: Musify-style full pipe with Range resume + 403 re-extract.
  */
 class NoteNativeModule : Module() {
 
@@ -159,41 +159,59 @@ class NoteNativeModule : Module() {
       outFile.parentFile?.mkdirs()
 
       var lastError: String? = null
+      var workingInfo = info
+      var workingCandidates = candidates
 
-      for (stream in candidates) {
-        val streamUrl = stream.content
-        if (streamUrl.isNullOrBlank()) continue
+      fun successMap(stream: AudioStream, written: Long): Map<String, Any?> = mapOf(
+        "ok" to true,
+        "path" to outFile.absolutePath,
+        "uri" to "file://${outFile.absolutePath}",
+        "bytes" to written,
+        "mimeType" to stream.format?.mimeType,
+        "bitrate" to stream.averageBitrate,
+        "durationSeconds" to workingInfo.duration,
+        "title" to workingInfo.name,
+        "uploader" to workingInfo.uploaderName,
+        "delivery" to stream.deliveryMethod.name,
+        "extractor" to "NewPipeExtractor/musify-pipe"
+      )
 
-        try {
-          if (outFile.exists()) outFile.delete()
+      for (round in 0 until 2) {
+        for (stream in workingCandidates) {
+          val streamUrl = stream.content
+          if (streamUrl.isNullOrBlank()) continue
 
-          val written = streamToFile(streamUrl, outFile)
-          val minExpected = minBytesFor(info.duration, stream.averageBitrate)
-
-          if (written < minExpected) {
-            outFile.delete()
-            lastError = "Incomplete: $written bytes (need >= $minExpected)"
-            continue
-          }
-
-          return mapOf(
-            "ok" to true,
-            "path" to outFile.absolutePath,
-            "uri" to "file://${outFile.absolutePath}",
-            "bytes" to written,
-            "mimeType" to stream.format?.mimeType,
-            "bitrate" to stream.averageBitrate,
-            "durationSeconds" to info.duration,
-            "title" to info.name,
-            "uploader" to info.uploaderName,
-            "delivery" to stream.deliveryMethod.name,
-            "extractor" to "NewPipeExtractor/musify-pipe"
-          )
-        } catch (e: Exception) {
-          lastError = e.message ?: e.javaClass.simpleName
           try {
-            outFile.delete()
-          } catch (_: Exception) {
+            val written = streamToFile(streamUrl, outFile)
+            val minExpected = minBytesFor(workingInfo.duration, stream.averageBitrate)
+
+            if (written < minExpected) {
+              lastError = "Incomplete: $written bytes (need >= $minExpected)"
+              if (written < minExpected / 3) {
+                try { outFile.delete() } catch (_: Exception) {}
+              }
+              continue
+            }
+
+            return successMap(stream, written)
+          } catch (e: Exception) {
+            lastError = e.message ?: e.javaClass.simpleName
+            val msg = lastError ?: ""
+            if (msg.contains("403") || msg.contains("401") || msg.contains("expired")) {
+              try { outFile.delete() } catch (_: Exception) {}
+              break
+            }
+          }
+        }
+
+        if (round == 0) {
+          try {
+            workingInfo = StreamInfo.getInfo(ServiceList.YouTube, watchUrl)
+            workingCandidates = audioDownloadCandidates(workingInfo.audioStreams)
+            if (workingCandidates.isEmpty()) break
+          } catch (e: Exception) {
+            lastError = e.message ?: lastError
+            break
           }
         }
       }
@@ -208,7 +226,6 @@ class NoteNativeModule : Module() {
     }
   }
 
-  /** AAC/mp4 first — expo-audio plays m4a; webm/opus often fails offline. */
   private fun isAacFamily(stream: AudioStream): Boolean {
     val mime = stream.format?.mimeType?.lowercase() ?: ""
     val name = stream.format?.name?.lowercase() ?: ""
@@ -243,7 +260,6 @@ class NoteNativeModule : Module() {
       return score
     }
 
-    // Highest score first: AAC/m4a preferred, then progressive, webm last
     return usable.sortedByDescending { rank(it) }
   }
 
@@ -265,82 +281,123 @@ class NoteNativeModule : Module() {
   private fun streamToFile(streamUrl: String, outFile: File): Long {
     var currentUrl = streamUrl
     var redirects = 0
+    val maxAttempts = 5
+    var lastError: Exception? = null
 
-    while (redirects < 10) {
-      val connection = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
-        requestMethod = "GET"
-        connectTimeout = DOWNLOAD_CONNECT_MS
-        readTimeout = DOWNLOAD_READ_MS
-        instanceFollowRedirects = false
-        setRequestProperty("User-Agent", NoteNativeDownloader.USER_AGENT)
-        setRequestProperty("Accept", "*/*")
-        setRequestProperty("Accept-Encoding", "identity")
-        setRequestProperty("Connection", "keep-alive")
-        setRequestProperty("Referer", "https://www.youtube.com/")
-        setRequestProperty("Origin", "https://www.youtube.com")
-      }
-
+    for (attempt in 0 until maxAttempts) {
       try {
-        val code = connection.responseCode
-        if (code in 301..308) {
-          val loc = connection.getHeaderField("Location")
-            ?: throw IOException("Redirect without Location ($code)")
-          currentUrl =
-            if (loc.startsWith("http")) loc
-            else URL(URL(currentUrl), loc).toString()
-          redirects++
-          connection.disconnect()
-          continue
-        }
+        val existingSize = if (outFile.exists()) outFile.length() else 0L
+        var written = existingSize
 
-        if (code == 403 || code == 401) {
-          throw IOException("HTTP $code — stream URL expired or blocked")
-        }
-
-        if (code !in 200..299) {
-          throw IOException("HTTP $code downloading audio")
-        }
-
-        val expected = connection.contentLengthLong
-        val input: InputStream = connection.inputStream
-          ?: throw IOException("Empty response body")
-
-        var written = 0L
-        FileOutputStream(outFile).use { fos ->
-          val buf = ByteArray(BUFFER)
-          while (true) {
-            val n = input.read(buf)
-            if (n < 0) break
-            fos.write(buf, 0, n)
-            written += n
+        val connection = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
+          requestMethod = "GET"
+          connectTimeout = DOWNLOAD_CONNECT_MS
+          readTimeout = DOWNLOAD_READ_MS
+          instanceFollowRedirects = false
+          setRequestProperty("User-Agent", NoteNativeDownloader.USER_AGENT)
+          setRequestProperty("Accept", "*/*")
+          setRequestProperty("Accept-Encoding", "identity")
+          setRequestProperty("Connection", "keep-alive")
+          setRequestProperty("Referer", "https://www.youtube.com/")
+          setRequestProperty("Origin", "https://www.youtube.com")
+          if (existingSize > 0L) {
+            setRequestProperty("Range", "bytes=$existingSize-")
           }
-          fos.flush()
         }
+
         try {
-          input.close()
-        } catch (_: Exception) {
-        }
+          val code = connection.responseCode
 
-        if (expected > 10_000L && written < (expected * 0.97).toLong()) {
-          outFile.delete()
-          throw IOException("Incomplete body: $written / $expected bytes")
-        }
+          if (code in 301..308) {
+            val loc = connection.getHeaderField("Location")
+              ?: throw IOException("Redirect without Location ($code)")
+            currentUrl =
+              if (loc.startsWith("http")) loc
+              else URL(URL(currentUrl), loc).toString()
+            redirects++
+            if (redirects > 8) throw IOException("Too many redirects")
+            connection.disconnect()
+            continue
+          }
 
-        if (written < 20_000L) {
-          outFile.delete()
-          throw IOException("File too small: $written bytes")
-        }
+          if (code == 416) {
+            val len = outFile.length()
+            if (len >= 30_000L) return len
+            outFile.delete()
+            throw IOException("HTTP 416 with tiny file: $len")
+          }
 
-        return written
-      } finally {
+          if (code == 403 || code == 401) {
+            try { outFile.delete() } catch (_: Exception) {}
+            throw IOException("HTTP $code — stream URL expired or blocked")
+          }
+
+          if (code != 200 && code != 206) {
+            throw IOException("HTTP $code downloading audio")
+          }
+
+          val contentLength = connection.contentLengthLong
+          val expectedTotal: Long = when {
+            code == 206 -> {
+              val cr = connection.getHeaderField("Content-Range")
+              val total = cr?.substringAfter("/")?.toLongOrNull()
+              total ?: (if (contentLength > 0) existingSize + contentLength else -1L)
+            }
+            contentLength > 0 -> contentLength
+            else -> -1L
+          }
+
+          val append = code == 206 && existingSize > 0L
+          if (code == 200 && existingSize > 0L) {
+            outFile.delete()
+            written = 0L
+          }
+
+          val input: InputStream = connection.inputStream
+            ?: throw IOException("Empty response body")
+
+          (if (append) FileOutputStream(outFile, true) else FileOutputStream(outFile)).use { fos ->
+            val buf = ByteArray(BUFFER)
+            while (true) {
+              val n = input.read(buf)
+              if (n < 0) break
+              fos.write(buf, 0, n)
+              written += n
+            }
+            fos.flush()
+          }
+          try { input.close() } catch (_: Exception) {}
+
+          val finalSize = outFile.length()
+
+          if (expectedTotal > 10_000L && finalSize < (expectedTotal * 0.96).toLong()) {
+            throw IOException("Incomplete: $finalSize / $expectedTotal")
+          }
+
+          if (finalSize < 30_000L) {
+            outFile.delete()
+            throw IOException("File too small: $finalSize")
+          }
+
+          return finalSize
+        } finally {
+          try { connection.disconnect() } catch (_: Exception) {}
+        }
+      } catch (e: Exception) {
+        lastError = e
+        val msg = e.message ?: ""
+        if (msg.contains("HTTP 403") || msg.contains("HTTP 401")) {
+          throw e
+        }
+        if (attempt == maxAttempts - 1) throw e
         try {
-          connection.disconnect()
-        } catch (_: Exception) {
+          Thread.sleep(600L * (attempt + 1).toLong())
+        } catch (_: InterruptedException) {
         }
       }
     }
 
-    throw IOException("Too many redirects")
+    throw lastError ?: IOException("Download failed after retries")
   }
 
   private fun bestProgressiveAudio(streams: List<AudioStream>?): AudioStream? =
