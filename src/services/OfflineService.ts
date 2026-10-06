@@ -2,7 +2,7 @@
  * Offline audio — YouTube only (Musify-style).
  *
  * Primary: native NoteNative.downloadYouTubeAudio
- *   → NewPipe audio streams → full byte pipe to file
+ *   → NewPipe audio streams → full byte pipe to file (Range resume)
  * Fallback: JS progressive download with Content-Length checks
  *
  * localUri is always a file:// URI that expo-audio can play offline.
@@ -71,14 +71,14 @@ try {
 const YT_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
-/** ~96 kbps × seconds × 0.55 — rejects 20–30s stub files */
+/** ~96 kbps × seconds × 0.70 — rejects half/stub files (Musify-style) */
 function minBytesFor(track: Track, bitrateKbps = 96): number {
   const dur = Number(track.duration) || 0;
   if (dur > 0) {
-    const expected = Math.floor(bitrateKbps * 125 * dur * 0.55);
-    return Math.max(120_000, expected);
+    const expected = Math.floor(bitrateKbps * 125 * dur * 0.7);
+    return Math.max(100_000, expected);
   }
-  return 1_000_000;
+  return 800_000;
 }
 
 function offlineDir(): string {
@@ -92,7 +92,7 @@ function safeName(trackId: string): string {
 }
 
 function toAbsolutePath(fileUri: string): string {
-  if (fileUri.startsWith('file://')) return fileUri.replace(/^file:\/\//, '');
+  if (fileUri.startsWith('file://')) return fileUri.replace(/^file:\/\/\/, '');
   return fileUri;
 }
 
@@ -177,10 +177,17 @@ export async function downloadTrackAudio(
   if (!videoId) throw new Error('No YouTube video id for this track');
 
   if (Platform.OS === 'android' && isNoteNativeAvailable()) {
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       if (signal?.aborted) throw new Error('Download cancelled');
       try {
-        await deleteQuiet(path);
+        // Resume: only wipe tiny/corrupt stubs; keep partial for native Range resume
+        if (attempt === 0) {
+          const existing = await fileSize(path);
+          if (existing > 0 && existing < Math.min(minBytes, 80_000)) {
+            await deleteQuiet(path);
+          }
+        }
+
         const abs = toAbsolutePath(path);
         const result = await nativeDownloadYouTubeAudio(videoId, abs);
 
@@ -202,7 +209,8 @@ export async function downloadTrackAudio(
           }
 
           const size = (await fileSize(finalPath)) || Number(result.bytes) || 0;
-          if (size >= minBytes || size >= 200_000) {
+          // STRICT: no soft pass on 200KB — half downloads must not count as success
+          if (size >= minBytes) {
             onProgress?.({ written: size, total: size, ratio: 1 });
             return {
               localUri: toFileUri(finalPath),
@@ -211,17 +219,19 @@ export async function downloadTrackAudio(
               bytes: size,
             };
           }
-          await deleteQuiet(finalPath);
+          if (size < 80_000) {
+            await deleteQuiet(finalPath);
+          }
           if (__DEV__) {
-            console.warn('[Offline] native file too small', size, 'need', minBytes);
+            console.warn('[Offline] native incomplete', size, 'need', minBytes);
           }
         } else if (__DEV__) {
           console.warn('[Offline] native fail', result.reason, result.message);
         }
       } catch (e) {
-        if (__DEV__) console.warn('[Offline] native error', e);
+        if (__DEV__) console.warn('[Offline] native error', attempt, e);
       }
-      await new Promise((r) => setTimeout(r, 400 + attempt * 300));
+      await new Promise((r) => setTimeout(r, 700 + attempt * 500));
     }
   }
 
@@ -315,17 +325,21 @@ async function downloadUrlToPath(
   const contentLength = Number(clRaw);
 
   if (Number.isFinite(contentLength) && contentLength > 50_000) {
-    if (size < contentLength * 0.97) {
+    if (size < contentLength * 0.96) {
       await deleteQuiet(path);
-      throw new Error(`Incomplete (${size}/${contentLength})`);
+      throw new Error(
+        `Incomplete download (${Math.round(size / 1000)}KB / ${Math.round(contentLength / 1000)}KB). Network weak — try again.`
+      );
     }
   } else if (size < minBytes) {
     await deleteQuiet(path);
-    throw new Error(`Incomplete — file too small (${size} < ${minBytes})`);
+    throw new Error(
+      `File too small (${Math.round(size / 1000)}KB). Need ~${Math.round(minBytes / 1000)}KB for this song.`
+    );
   }
 }
 
-/** Musify-style concurrent playlist offline (max 3 workers). */
+/** Musify-style concurrent playlist offline (max 2 workers — less fight with playback). */
 export async function downloadTracksBatch(
   tracks: Track[],
   options: {
@@ -340,7 +354,7 @@ export async function downloadTracksBatch(
     onOverall?: (done: number, failed: number, total: number) => void;
   } = {}
 ): Promise<{ completed: number; failed: number; results: DownloadResult[] }> {
-  const concurrency = Math.max(1, Math.min(options.concurrency ?? 3, 3));
+  const concurrency = Math.max(1, Math.min(options.concurrency ?? 2, 2));
   const list = tracks.filter(Boolean);
   let done = 0;
   let failed = 0;
