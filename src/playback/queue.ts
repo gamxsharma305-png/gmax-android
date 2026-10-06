@@ -228,13 +228,23 @@ export class Queue {
     return this.current;
   }
 
-  peekNext(): Track | null {
-    if (!this.tracks.length) return null;
-    if (this.position < this.order.length - 1) {
-      return this.tracks[this.order[this.position + 1]] ?? null;
+  /** Next track without advancing — offset 0 = immediate next. */
+  peekUpcoming(offset = 0): Track | null {
+    const idx = this.position + 1 + offset;
+    if (idx < 0 || idx >= this.order.length) {
+      if (this.repeatMode === 'all' && this.order.length) {
+        const wrapped = ((idx % this.order.length) + this.order.length) % this.order.length;
+        const ti = this.order[wrapped];
+        return this.tracks[ti] ?? null;
+      }
+      return null;
     }
-    if (this.repeatMode === 'all') return this.tracks[this.order[0]] ?? null;
-    return null;
+    const ti = this.order[idx];
+    return this.tracks[ti] ?? null;
+  }
+
+  peekNext(): Track | null {
+    return this.peekUpcoming(0);
   }
 
   private rebuildOrder(pinFirst?: number): void {
