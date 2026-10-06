@@ -11,9 +11,8 @@ export interface StreamSource {
 }
 
 const STREAM_TTL = 4 * 60 * 60 * 1000;
-const LOCAL_TTL = 10 * 365 * 24 * 60 * 60 * 1000; // local files don't expire
+const LOCAL_TTL = 10 * 365 * 24 * 60 * 60 * 1000;
 
-/** Offline file first — no network needed. */
 export class LocalStreamSource implements StreamSource {
   readonly id = 'local';
 
@@ -215,7 +214,6 @@ export class StreamResolverChain {
   }
 
   async resolve(track: Track, signal?: AbortSignal): Promise<ResolvedStream> {
-    // Always prefer local offline file — skip network cache
     if (track.localUri) {
       return {
         url: track.localUri,
@@ -248,34 +246,104 @@ export class StreamResolverChain {
       );
     }
 
-    let lastError: AppError | undefined;
-
-    for (const source of usable) {
-      try {
-        const stream = await source.resolve(track, signal);
-        this.cache.set(track.id, stream);
-        return stream;
-      } catch (e) {
-        const err = toAppError(e, 'source_unavailable');
-        if (err.kind === 'track_unavailable' || err.kind === 'region_restricted') throw err;
-        lastError = err;
-      }
+    const instant = usable.find((s) => s.id === 'local' || s.id === 'direct');
+    if (instant) {
+      const stream = await instant.resolve(track, signal);
+      this.cache.set(track.id, stream);
+      return stream;
     }
 
-    throw lastError ?? appError('source_unavailable');
+    return new Promise<ResolvedStream>((resolve, reject) => {
+      let pending = usable.length;
+      let lastError: AppError | undefined;
+      let settled = false;
+      const childControllers: AbortController[] = [];
+
+      const settleOk = (stream: ResolvedStream) => {
+        if (settled) return;
+        settled = true;
+        for (const c of childControllers) {
+          try {
+            c.abort();
+          } catch {
+            /* ok */
+          }
+        }
+        this.cache.set(track.id, stream);
+        resolve(stream);
+      };
+
+      const settleFail = (err: AppError) => {
+        lastError = err;
+        pending -= 1;
+        if (pending <= 0 && !settled) {
+          reject(lastError ?? appError('source_unavailable'));
+        }
+      };
+
+      const onParentAbort = () => {
+        for (const c of childControllers) {
+          try {
+            c.abort();
+          } catch {
+            /* ok */
+          }
+        }
+        if (!settled) {
+          settled = true;
+          reject(appError('timeout'));
+        }
+      };
+      signal?.addEventListener('abort', onParentAbort);
+
+      for (const source of usable) {
+        const child = new AbortController();
+        childControllers.push(child);
+
+        const timer = setTimeout(() => {
+          try {
+            child.abort();
+          } catch {
+            /* ok */
+          }
+        }, source.id === 'native-newpipe' ? 14_000 : 10_000);
+
+        source
+          .resolve(track, child.signal)
+          .then((stream) => {
+            clearTimeout(timer);
+            if (signal?.aborted) {
+              settleFail(appError('timeout'));
+              return;
+            }
+            settleOk(stream);
+          })
+          .catch((e) => {
+            clearTimeout(timer);
+            const err = toAppError(e, 'source_unavailable');
+            if (err.kind === 'track_unavailable' || err.kind === 'region_restricted') {
+              if (!settled) {
+                settled = true;
+                for (const c of childControllers) {
+                  try {
+                    c.abort();
+                  } catch {
+                    /* ok */
+                  }
+                }
+                reject(err);
+              }
+              return;
+            }
+            settleFail(err);
+          });
+      }
+    });
   }
 }
 
 export const endpointSource = new EndpointStreamSource();
 
-/**
- * Order for YouTube background play:
- * 0) Local offline file
- * 1) Direct audioUrl (Saavn/Audius/iTunes)
- * 2) Native NewPipe
- * 3) Title match Saavn/Audius fallback
- * 4) Public Invidious/Piped endpoints
- */
 export const streamResolver = new StreamResolverChain()
   .use(new LocalStreamSource())
   .use(new DirectStreamSource())
