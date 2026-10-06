@@ -113,7 +113,8 @@ module.exports = {
     "./plugins/withCoreLibraryDesugaring",
     "./plugins/withJitpack",
     "./plugins/withAndroidAbis",
-    "./plugins/withReleaseSigning",
+    // withReleaseSigning REMOVED — debug keystore causes "package appears to be invalid"
+    // on Android 11+. EAS remote credentials sign with v1+v2+v3 properly.
   ],
   extra: {
     ...(appJson.expo && appJson.expo.extra ? appJson.expo.extra : {}),
