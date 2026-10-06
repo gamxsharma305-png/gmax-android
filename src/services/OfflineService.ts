@@ -18,7 +18,6 @@ import {
 export type ProgressCb = (p: {
   written: number;
   total: number;
-  /** 0–1 when total known */
   ratio?: number;
 }) => void;
 
@@ -92,7 +91,9 @@ function safeName(trackId: string): string {
 }
 
 function toAbsolutePath(fileUri: string): string {
-  if (fileUri.startsWith('file://')) return fileUri.replace(/^file:\/\/\/, '');
+  if (fileUri.startsWith('file://')) {
+    return fileUri.slice('file://'.length);
+  }
   return fileUri;
 }
 
@@ -137,9 +138,6 @@ async function deleteQuiet(uri: string): Promise<void> {
   }
 }
 
-/**
- * One-track full YouTube offline download (Musify makeSongOffline equivalent).
- */
 export async function downloadTrackAudio(
   track: Track,
   signal?: AbortSignal,
@@ -180,7 +178,6 @@ export async function downloadTrackAudio(
     for (let attempt = 0; attempt < 3; attempt++) {
       if (signal?.aborted) throw new Error('Download cancelled');
       try {
-        // Resume: only wipe tiny/corrupt stubs; keep partial for native Range resume
         if (attempt === 0) {
           const existing = await fileSize(path);
           if (existing > 0 && existing < Math.min(minBytes, 80_000)) {
@@ -209,7 +206,6 @@ export async function downloadTrackAudio(
           }
 
           const size = (await fileSize(finalPath)) || Number(result.bytes) || 0;
-          // STRICT: no soft pass on 200KB — half downloads must not count as success
           if (size >= minBytes) {
             onProgress?.({ written: size, total: size, ratio: 1 });
             return {
@@ -339,7 +335,6 @@ async function downloadUrlToPath(
   }
 }
 
-/** Musify-style concurrent playlist offline (max 2 workers — less fight with playback). */
 export async function downloadTracksBatch(
   tracks: Track[],
   options: {
