@@ -1,7 +1,7 @@
 {
-  "version": "1.2.8",
-  "versionCode": 44,
-  "apkUrl": "https://github.com/gamxsharma305-png/gmax-android/releases/download/1.2.8/application-8e6ee8c0-9325-4dfc-a3c9-ce30a02276a0.apk",
+  "version": "1.2.4",
+  "versionCode": 45,
+  "apkUrl": "",
   "force": false,
-  "notes": "Deep search (150–200 results) • Working accent/theme colors • AroLinks Get Key fix • Offline + playlist improvements"
+  "notes": "version 1.2.4 display — versionCode 45 required for Android in-place update."
 }
