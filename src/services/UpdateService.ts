@@ -1,10 +1,11 @@
 /**
  * Self-hosted in-app updates (sideload APK).
- * Download APK, verify size, open system installer.
- * On parse failure → open browser (most reliable on MIUI/realme).
+ * Version name/code stay frozen at 1.2.4 / 39 for install safety.
+ * New builds are detected via buildId / apkUrl + versionCode.
  */
 import { Linking, Platform } from 'react-native';
 import Constants from 'expo-constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type UpdateInfo = {
   version: string;
@@ -12,13 +13,14 @@ export type UpdateInfo = {
   apkUrl: string;
   force?: boolean;
   notes?: string;
+  /** Unique per release APK — used when versionCode stays frozen at 39 */
+  buildId?: string;
 };
 
 const UPDATE_MANIFEST_URL =
   'https://raw.githubusercontent.com/gamxsharma305-png/gmax-android/main/update.json';
 
-/** Reject tiny/corrupt files (real GMAX APK is ~80–120 MB) */
-const MIN_APK_BYTES = 20 * 1024 * 1024;
+const STORAGE_APPLIED = 'gmax_update_applied_key';
 
 type FSModule = {
   cacheDirectory: string | null;
@@ -61,7 +63,6 @@ function currentVersionCode(): number {
   const android = Constants.expoConfig?.android as { versionCode?: number } | undefined;
   const fromConfig = Number(android?.versionCode) || 0;
   if (fromConfig > 0) return fromConfig;
-  // Fallback: native build number (some Expo embeds)
   const native = Number(Constants.nativeBuildVersion) || 0;
   return native > 0 ? native : 0;
 }
@@ -74,9 +75,35 @@ function currentVersionName(): string {
   );
 }
 
+export function updateKey(remote: Pick<UpdateInfo, 'buildId' | 'apkUrl'>): string {
+  if (remote.buildId && String(remote.buildId).trim()) return String(remote.buildId).trim();
+  if (remote.apkUrl && remote.apkUrl.startsWith('http')) return remote.apkUrl.trim();
+  return '';
+}
+
+export async function getAppliedUpdateKey(): Promise<string | null> {
+  try {
+    return (await AsyncStorage.getItem(STORAGE_APPLIED)) || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Call after user opens the APK link — stops popup for this release. */
+export async function markUpdateApplied(
+  remote: Pick<UpdateInfo, 'buildId' | 'apkUrl'>
+): Promise<void> {
+  const key = updateKey(remote);
+  if (!key) return;
+  try {
+    await AsyncStorage.setItem(STORAGE_APPLIED, key);
+  } catch {
+    /* ok */
+  }
+}
+
 export async function checkForUpdate(_legacyVersionArg?: string): Promise<{
   available: boolean;
-  /** @deprecated use `available` — kept so older App.tsx still works if any */
   updateAvailable: boolean;
   remote?: UpdateInfo;
   localVersion: string;
@@ -97,15 +124,48 @@ export async function checkForUpdate(_legacyVersionArg?: string): Promise<{
     }
     const remote = (await res.json()) as UpdateInfo;
     const remoteCode = Number(remote.versionCode) || 0;
-    const hasApk = typeof remote.apkUrl === 'string' && remote.apkUrl.startsWith('http');
-    const available = remoteCode > localCode && hasApk;
-    return { available, updateAvailable: available, remote, localVersion, localCode };
+    const hasApk =
+      typeof remote.apkUrl === 'string' && remote.apkUrl.startsWith('http');
+    if (!hasApk) {
+      return {
+        available: false,
+        updateAvailable: false,
+        remote,
+        localVersion,
+        localCode,
+      };
+    }
+
+    const key = updateKey(remote);
+    const applied = await getAppliedUpdateKey();
+    if (key && applied && applied === key) {
+      return {
+        available: false,
+        updateAvailable: false,
+        remote,
+        localVersion,
+        localCode,
+      };
+    }
+
+    // Higher versionCode (all existing app builds understand this)
+    const codeNewer = remoteCode > localCode;
+    // Same frozen code + new release key (next builds with this UpdateService)
+    const sameCodeNewBuild = !codeNewer && !!key;
+    const available = codeNewer || sameCodeNewBuild;
+
+    return {
+      available,
+      updateAvailable: available,
+      remote,
+      localVersion,
+      localCode,
+    };
   } catch {
     return { available: false, updateAvailable: false, localVersion, localCode };
   }
 }
 
-/** Alias for older imports */
 export type RemoteUpdate = UpdateInfo;
 
 export type DownloadProgress = {
@@ -114,28 +174,14 @@ export type DownloadProgress = {
   total: number;
 };
 
-/**
- * Reliable path for most Android OEMs:
- * open the APK URL in the system browser / download manager.
- * Avoids "problem parsing the package" from broken content:// installs.
- */
 export async function openApkInBrowser(apkUrl: string): Promise<void> {
   await Linking.openURL(apkUrl);
 }
 
-/**
- * Download APK to cache, verify size, try installer; else browser.
- */
 export async function downloadAndInstallApk(
   apkUrl: string,
-  onProgress?: (p: DownloadProgress) => void
+  _onProgress?: (p: DownloadProgress) => void
 ): Promise<{ ok: boolean; error?: string; usedBrowser?: boolean }> {
-  if (Platform.OS !== 'android') {
-    await Linking.openURL(apkUrl);
-    return { ok: true, usedBrowser: true };
-  }
-
-  // Always prefer browser for reliability (user request — no parse errors)
   try {
     await Linking.openURL(apkUrl);
     return { ok: true, usedBrowser: true };
