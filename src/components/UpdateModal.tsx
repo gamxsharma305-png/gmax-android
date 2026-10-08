@@ -68,7 +68,7 @@ export function UpdateModal({ visible, remote, localVersion, onClose }: Props) {
           <Text style={styles.badge}>UPDATE</Text>
           <Text style={styles.title}>Naya update available</Text>
           <Text style={styles.sub}>
-            Version {remote.version} ready.{\n}Aapka version: {localVersion}
+            {`Version ${remote.version} ready.\nAapka version: ${localVersion}`}
           </Text>
           {!!remote.notes && <Text style={styles.notes}>{remote.notes}</Text>}
 
@@ -79,32 +79,30 @@ export function UpdateModal({ visible, remote, localVersion, onClose }: Props) {
             </View>
           )}
 
-          {err ? <Text style={styles.err}>{err}</Text> : null}
-          {hint ? <Text style={styles.hint}>{hint}</Text> : null}
+          {!!err && <Text style={styles.err}>{err}</Text>}
+          {!!hint && <Text style={styles.hint}>{hint}</Text>}
 
           <TouchableOpacity
             style={[styles.primary, busy && styles.disabled]}
-            onPress={() => void onUpdate()}
             disabled={busy}
-            activeOpacity={0.85}
+            onPress={() => {
+              void onUpdate();
+            }}
           >
             <Text style={styles.primaryText}>
-              {busy ? 'Please wait…' : 'Update — Browser me download'}
+              {busy ? 'Opening…' : 'Update now'}
             </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.browserBtn, busy && styles.disabled]}
-            onPress={() => void onBrowser()}
-            disabled={busy}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.browserText}>Link dubara browser me kholo</Text>
-          </TouchableOpacity>
-
-          {!remote.force && (
-            <TouchableOpacity style={styles.secondary} onPress={onClose} disabled={busy}>
-              <Text style={styles.secondaryText}>Later</Text>
+          {!!remote.apkUrl && (
+            <TouchableOpacity
+              style={styles.browserBtn}
+              disabled={busy}
+              onPress={() => {
+                void onBrowser();
+              }}
+            >
+              <Text style={styles.browserText}>Browser me open</Text>
             </TouchableOpacity>
           )}
 
