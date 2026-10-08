@@ -11,6 +11,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Search, Play, Heart, ListMusic, Moon, Target, User } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { GlassCard } from '../components/common/GlassCard';
 import { TrackRow } from '../components/lists/TrackRow';
@@ -22,6 +23,8 @@ import { useLibrary } from '../hooks/useLibrary';
 import { MusicService } from '../services/MusicService';
 import { MiniPlayer } from '../components/player/MiniPlayer';
 import { StatusBarScrim } from '../components/common/StatusBarScrim';
+import { HomeAdModal } from '../components/HomeAdModal';
+import { fetchRemoteAds, type RemoteAds } from '../services/RemoteConfigService';
 
 const CHILL_QUERIES = [
   'Arijit Singh lofi hindi songs soft romantic',
@@ -128,6 +131,41 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { playTrack, currentTrack, isPlaying, togglePlayPause, isLoading } = usePlayer();
+  const [homeAds, setHomeAds] = useState<RemoteAds | null>(null);
+  const [showHomeAd, setShowHomeAd] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    (async () => {
+      try {
+        const ads = await fetchRemoteAds();
+        if (cancelled || !ads.enabled || !ads.items?.length) return;
+
+        if (ads.oncePerDay) {
+          const key = `gmax_home_ad_day_${new Date().toISOString().slice(0, 10)}`;
+          const seen = await AsyncStorage.getItem(key);
+          if (seen) return;
+        }
+
+        const delay = Math.max(0, (ads.delaySeconds ?? 10) * 1000);
+        timer = setTimeout(() => {
+          if (cancelled) return;
+          setHomeAds(ads);
+          setShowHomeAd(true);
+        }, delay);
+      } catch {
+        /* ignore */
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
+
   const { recentlyPlayed, liked, profile } = useLibrary();
 
   const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -144,7 +182,6 @@ export default function HomeScreen() {
     [playTrack]
   );
 
-  // Load all category shelves in parallel
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -173,7 +210,6 @@ export default function HomeScreen() {
     };
   }, []);
 
-  // “Based on recent listening” from last played artist/title
   useEffect(() => {
     let cancelled = false;
     const seed = recentlyPlayed[0];
@@ -182,9 +218,7 @@ export default function HomeScreen() {
       return;
     }
     const artist = seed.artist?.name || '';
-    const q = artist
-      ? `${artist} songs hits`
-      : `${seed.title} similar songs`;
+    const q = artist ? `${artist} songs hits` : `${seed.title} similar songs`;
     setBasedTitle(artist ? `More like ${artist}` : 'Based on your recent listening');
     (async () => {
       try {
@@ -286,13 +320,8 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Recents — horizontal like Spotify */}
         {recents.length > 0 && (
-          <HorizontalShelf
-            title="Recents"
-            tracks={recents}
-            onPlay={onPlay}
-          />
+          <HorizontalShelf title="Recents" tracks={recents} onPlay={onPlay} />
         )}
 
         {basedOn.length > 0 && (
@@ -309,7 +338,6 @@ export default function HomeScreen() {
           />
         ))}
 
-        {/* Vertical list of first recommended for quick browse */}
         {(shelves.recommended || []).length > 0 && (
           <View style={styles.listSection}>
             <Text style={styles.shelfHeading}>Quick play</Text>
@@ -328,6 +356,20 @@ export default function HomeScreen() {
 
       <StatusBarScrim />
       <AddToPlaylistSheet track={addingTrack} onClose={() => setAddingTrack(null)} />
+
+      {homeAds && (
+        <HomeAdModal
+          visible={showHomeAd}
+          ads={homeAds}
+          onClose={() => {
+            setShowHomeAd(false);
+            if (homeAds.oncePerDay) {
+              const key = `gmax_home_ad_day_${new Date().toISOString().slice(0, 10)}`;
+              void AsyncStorage.setItem(key, '1');
+            }
+          }}
+        />
+      )}
 
       {currentTrack && (
         <MiniPlayer
