@@ -11,7 +11,11 @@ import { YouTubeHost } from './src/player/YouTubeHost';
 import { GSplash } from './src/components/GSplash';
 import { UpdateModal } from './src/components/UpdateModal';
 import { COLORS } from './src/constants/theme';
-import { checkForUpdate, UpdateInfo } from './src/services/UpdateService';
+import {
+  checkForUpdate,
+  markUpdateShown,
+  UpdateInfo,
+} from './src/services/UpdateService';
 import { trackAppOpen } from './src/services/AnalyticsService';
 import Constants from 'expo-constants';
 
@@ -37,6 +41,7 @@ export default function App() {
           if (result.available && result.remote) {
             setUpdateRemote(result.remote);
             setShowUpdate(true);
+            void markUpdateShown(result.remote);
           }
         } catch {
           // network / parse — silent
