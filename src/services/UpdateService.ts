@@ -1,7 +1,8 @@
 /**
  * Self-hosted in-app updates (sideload APK).
  * Version name/code stay frozen at 1.2.4 / 39 for install safety.
- * New builds are detected via buildId / apkUrl + versionCode.
+ * Primary: gmax-premium-api /api/app-update (no APK rebuild to change link).
+ * Fallback: GitHub update.json
  */
 import { Linking, Platform } from 'react-native';
 import Constants from 'expo-constants';
@@ -13,51 +14,15 @@ export type UpdateInfo = {
   apkUrl: string;
   force?: boolean;
   notes?: string;
-  /** Unique per release APK — used when versionCode stays frozen at 39 */
   buildId?: string;
 };
 
 const UPDATE_MANIFEST_URL =
   'https://raw.githubusercontent.com/gamxsharma305-png/gmax-android/main/update.json';
 
+const UPDATE_API_URL = 'https://gmax-premium-api.vercel.app/api/app-update';
+
 const STORAGE_APPLIED = 'gmax_update_applied_key';
-
-type FSModule = {
-  cacheDirectory: string | null;
-  documentDirectory: string | null;
-  getInfoAsync: (uri: string) => Promise<{ exists: boolean; size?: number }>;
-  downloadAsync: (
-    url: string,
-    fileUri: string,
-    opts?: { headers?: Record<string, string> }
-  ) => Promise<{ uri: string; status: number }>;
-  createDownloadResumable?: (
-    url: string,
-    fileUri: string,
-    options?: { headers?: Record<string, string> },
-    callback?: (progress: {
-      totalBytesWritten: number;
-      totalBytesExpectedToWrite: number;
-    }) => void
-  ) => {
-    downloadAsync: () => Promise<{ uri: string; status?: number } | undefined>;
-  };
-  getContentUriAsync?: (uri: string) => Promise<string>;
-  deleteAsync: (uri: string, opts?: { idempotent?: boolean }) => Promise<void>;
-};
-
-let FileSystem: FSModule | null = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  FileSystem = require('expo-file-system/legacy') as FSModule;
-} catch {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    FileSystem = require('expo-file-system') as FSModule;
-  } catch {
-    FileSystem = null;
-  }
-}
 
 function currentVersionCode(): number {
   const android = Constants.expoConfig?.android as { versionCode?: number } | undefined;
@@ -89,7 +54,6 @@ export async function getAppliedUpdateKey(): Promise<string | null> {
   }
 }
 
-/** Call after user opens the APK link — stops popup for this release. */
 export async function markUpdateApplied(
   remote: Pick<UpdateInfo, 'buildId' | 'apkUrl'>
 ): Promise<void> {
@@ -113,16 +77,36 @@ export async function checkForUpdate(_legacyVersionArg?: string): Promise<{
   const localVersion = currentVersionName();
 
   try {
-    const res = await fetch(`${UPDATE_MANIFEST_URL}?t=${Date.now()}`, {
-      headers: {
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        Pragma: 'no-cache',
-      },
-    });
-    if (!res.ok) {
+    let remote: UpdateInfo | null = null;
+
+    try {
+      const apiRes = await fetch(`${UPDATE_API_URL}?t=${Date.now()}`, {
+        headers: { 'Cache-Control': 'no-cache' },
+      });
+      if (apiRes.ok) {
+        remote = (await apiRes.json()) as UpdateInfo;
+      }
+    } catch {
+      /* fall through */
+    }
+
+    if (!remote || !(remote.apkUrl && String(remote.apkUrl).startsWith('http'))) {
+      const res = await fetch(`${UPDATE_MANIFEST_URL}?t=${Date.now()}`, {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          Pragma: 'no-cache',
+        },
+      });
+      if (!res.ok) {
+        return { available: false, updateAvailable: false, localVersion, localCode };
+      }
+      remote = (await res.json()) as UpdateInfo;
+    }
+
+    if (!remote) {
       return { available: false, updateAvailable: false, localVersion, localCode };
     }
-    const remote = (await res.json()) as UpdateInfo;
+
     const remoteCode = Number(remote.versionCode) || 0;
     const hasApk =
       typeof remote.apkUrl === 'string' && remote.apkUrl.startsWith('http');
@@ -148,9 +132,7 @@ export async function checkForUpdate(_legacyVersionArg?: string): Promise<{
       };
     }
 
-    // Higher versionCode (all existing app builds understand this)
     const codeNewer = remoteCode > localCode;
-    // Same frozen code + new release key (next builds with this UpdateService)
     const sameCodeNewBuild = !codeNewer && !!key;
     const available = codeNewer || sameCodeNewBuild;
 
