@@ -22,6 +22,7 @@ import { COLORS, FONTS } from '../constants/theme';
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 const AnimatedG = Animated.createAnimatedComponent(G);
 
+/** Full G letter path — viewBox 0 0 120 120 */
 const G_PATH = `M 88 42
 C 82 28 72 22 58 22
 C 38 22 24 36 24 58
@@ -34,7 +35,8 @@ L 62 58`;
 
 const ACCENT_PATH = 'M 62 54 L 92 54 L 92 62 L 62 62 Z';
 
-const STROKE_LEN = 320;
+/** Path length estimate — keep >= real length so stroke fully appears */
+const STROKE_LEN = 380;
 
 type Props = {
   onDone: () => void;
@@ -42,20 +44,20 @@ type Props = {
 };
 
 /**
- * GMAX intro — same draw as website, fully on-screen (not cut / not over-zoomed).
+ * Full-screen GMAX intro — complete logo (not cut), solid background, then fade.
  */
-export function GSplash({ onDone, minMs = 2800 }: Props) {
+export function GSplash({ onDone, minMs = 3400 }: Props) {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
   const draw = useRef(new Animated.Value(0)).current;
+  const logoOp = useRef(new Animated.Value(0)).current;
   const guideOp = useRef(new Animated.Value(0)).current;
   const accentOp = useRef(new Animated.Value(0)).current;
-  const accentScale = useRef(new Animated.Value(0.4)).current;
+  const accentScale = useRef(new Animated.Value(0.5)).current;
   const copyOp = useRef(new Animated.Value(0)).current;
-  const copyY = useRef(new Animated.Value(10)).current;
+  const copyY = useRef(new Animated.Value(12)).current;
   const outOp = useRef(new Animated.Value(1)).current;
-  const outScale = useRef(new Animated.Value(1)).current;
   const doneRef = useRef(false);
 
   const finish = () => {
@@ -67,33 +69,38 @@ export function GSplash({ onDone, minMs = 2800 }: Props) {
   useEffect(() => {
     Animated.timing(guideOp, {
       toValue: 1,
-      duration: 600,
+      duration: 500,
       useNativeDriver: true,
       easing: Easing.out(Easing.ease),
     }).start();
 
     Animated.timing(draw, {
       toValue: 1,
-      duration: 1350,
-      delay: 150,
+      duration: 1400,
+      delay: 120,
       useNativeDriver: false,
       easing: Easing.bezier(0.4, 0, 0.2, 1),
+    }).start();
+
+    Animated.timing(logoOp, {
+      toValue: 1,
+      duration: 600,
+      delay: 200,
+      useNativeDriver: true,
     }).start();
 
     Animated.parallel([
       Animated.timing(accentOp, {
         toValue: 1,
-        duration: 450,
-        delay: 1200,
+        duration: 400,
+        delay: 1300,
         useNativeDriver: true,
-        easing: Easing.out(Easing.ease),
       }),
-      Animated.timing(accentScale, {
+      Animated.spring(accentScale, {
         toValue: 1,
-        duration: 450,
-        delay: 1200,
+        delay: 1300,
+        friction: 6,
         useNativeDriver: true,
-        easing: Easing.out(Easing.ease),
       }),
     ]).start();
 
@@ -101,37 +108,31 @@ export function GSplash({ onDone, minMs = 2800 }: Props) {
       Animated.parallel([
         Animated.timing(copyOp, {
           toValue: 1,
-          duration: 500,
+          duration: 450,
           useNativeDriver: true,
-          easing: Easing.out(Easing.ease),
         }),
         Animated.timing(copyY, {
           toValue: 0,
-          duration: 500,
+          duration: 450,
           useNativeDriver: true,
           easing: Easing.out(Easing.ease),
         }),
       ]).start();
-    }, 1400);
+    }, 1500);
 
+    const fadeStart = Math.max(minMs - 450, 2200);
     const t2 = setTimeout(() => {
-      Animated.parallel([
-        Animated.timing(outOp, {
-          toValue: 0,
-          duration: 400,
-          useNativeDriver: true,
-          easing: Easing.out(Easing.ease),
-        }),
-        Animated.timing(outScale, {
-          toValue: 1.04,
-          duration: 400,
-          useNativeDriver: true,
-          easing: Easing.out(Easing.ease),
-        }),
-      ]).start();
-    }, Math.max(minMs - 400, 0));
+      Animated.timing(outOp, {
+        toValue: 0,
+        duration: 420,
+        useNativeDriver: true,
+        easing: Easing.out(Easing.ease),
+      }).start(({ finished }) => {
+        if (finished) finish();
+      });
+    }, fadeStart);
 
-    const t3 = setTimeout(finish, minMs);
+    const t3 = setTimeout(finish, minMs + 50);
 
     return () => {
       clearTimeout(t1);
@@ -146,82 +147,82 @@ export function GSplash({ onDone, minMs = 2800 }: Props) {
     outputRange: [STROKE_LEN, 0],
   });
 
-  // Balanced size: readable G, full path visible on all phones
-  const svgSize = Math.min(150, Math.round(width * 0.38), Math.round(height * 0.22));
-  const gridSize = Math.round(svgSize * 1.4);
+  const svgSize = Math.min(
+    200,
+    Math.round(Math.min(width * 0.48, height * 0.28)),
+    Math.max(140, Math.round(width * 0.42))
+  );
 
   return (
-    <Pressable onPress={finish} style={StyleSheet.absoluteFill}>
+    <Pressable onPress={finish} style={styles.root}>
       <Animated.View
         style={[
           styles.wrap,
           {
             opacity: outOp,
-            transform: [{ scale: outScale }],
             paddingTop: insets.top,
             paddingBottom: insets.bottom,
           },
         ]}
       >
-        <View
-          style={[
-            styles.grid,
-            {
-              width: gridSize,
-              height: gridSize,
-              marginTop: -gridSize / 2,
-            },
-          ]}
-          pointerEvents="none"
-        />
-
         <View style={styles.stage}>
-          <View style={[styles.svgWrap, { width: svgSize, height: svgSize }]}>
-            <Svg
-              width={svgSize}
-              height={svgSize}
-              viewBox="0 0 120 120"
-              preserveAspectRatio="xMidYMid meet"
-            >
-              <Defs>
-                <LinearGradient id="gmaxGStroke" x1="24" y1="22" x2="92" y2="96">
-                  <Stop offset="0" stopColor="#f0f0f0" />
-                  <Stop offset="1" stopColor="#1db954" />
-                </LinearGradient>
-                <LinearGradient id="gmaxGFill" x1="62" y1="54" x2="92" y2="62">
-                  <Stop offset="0" stopColor="#1db954" />
-                  <Stop offset="1" stopColor="#6ee7a0" />
-                </LinearGradient>
-              </Defs>
+          <Animated.View style={{ opacity: logoOp }}>
+            <View style={[styles.svgWrap, { width: svgSize, height: svgSize }]}>
+              <Svg
+                width={svgSize}
+                height={svgSize}
+                viewBox="0 0 120 120"
+                preserveAspectRatio="xMidYMid meet"
+              >
+                <Defs>
+                  <LinearGradient id="gmaxGStroke" x1="24" y1="22" x2="92" y2="96">
+                    <Stop offset="0" stopColor="#f5f5f5" />
+                    <Stop offset="1" stopColor="#1db954" />
+                  </LinearGradient>
+                  <LinearGradient id="gmaxGFill" x1="62" y1="54" x2="92" y2="62">
+                    <Stop offset="0" stopColor="#1db954" />
+                    <Stop offset="1" stopColor="#6ee7a0" />
+                  </LinearGradient>
+                </Defs>
 
-              <AnimatedG opacity={guideOp}>
-                <Circle
-                  cx="60"
-                  cy="60"
-                  r="46"
+                <AnimatedG opacity={guideOp}>
+                  <Circle
+                    cx="60"
+                    cy="60"
+                    r="48"
+                    stroke="rgba(255,255,255,0.14)"
+                    strokeWidth="1.2"
+                    strokeDasharray="4 6"
+                    fill="none"
+                  />
+                </AnimatedG>
+
+                <Path
+                  d={G_PATH}
                   stroke="rgba(255,255,255,0.12)"
-                  strokeWidth="1"
-                  strokeDasharray="4 6"
+                  strokeWidth="7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
                   fill="none"
                 />
-              </AnimatedG>
 
-              <AnimatedPath
-                d={G_PATH}
-                stroke="url(#gmaxGStroke)"
-                strokeWidth="7"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                fill="none"
-                strokeDasharray={`${STROKE_LEN}`}
-                strokeDashoffset={strokeDashoffset as unknown as number}
-              />
+                <AnimatedPath
+                  d={G_PATH}
+                  stroke="url(#gmaxGStroke)"
+                  strokeWidth="7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  fill="none"
+                  strokeDasharray={`${STROKE_LEN}`}
+                  strokeDashoffset={strokeDashoffset as unknown as number}
+                />
 
-              <AnimatedG opacity={accentOp} origin="77, 58" scaleX={accentScale}>
-                <Path d={ACCENT_PATH} fill="url(#gmaxGFill)" />
-              </AnimatedG>
-            </Svg>
-          </View>
+                <AnimatedG opacity={accentOp} origin="77, 58" scaleX={accentScale}>
+                  <Path d={ACCENT_PATH} fill="url(#gmaxGFill)" />
+                </AnimatedG>
+              </Svg>
+            </View>
+          </Animated.View>
 
           <Animated.View
             style={[
@@ -237,7 +238,7 @@ export function GSplash({ onDone, minMs = 2800 }: Props) {
           </Animated.View>
         </View>
 
-        <Text style={[styles.hint, { bottom: Math.max(insets.bottom, 16) + 12 }]}>
+        <Text style={[styles.hint, { bottom: Math.max(insets.bottom, 16) + 16 }]}>
           TAP TO SKIP
         </Text>
       </Animated.View>
@@ -246,26 +247,21 @@ export function GSplash({ onDone, minMs = 2800 }: Props) {
 }
 
 const styles = StyleSheet.create({
+  root: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 999,
+    elevation: 999,
+  },
   wrap: {
     ...StyleSheet.absoluteFillObject,
-    zIndex: 100,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#050707',
-    overflow: 'hidden',
-  },
-  grid: {
-    position: 'absolute',
-    top: '50%',
-    alignSelf: 'center',
-    opacity: 0.55,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.06)',
   },
   stage: {
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 24,
+    gap: 28,
   },
   svgWrap: {
     alignItems: 'center',
@@ -278,26 +274,27 @@ const styles = StyleSheet.create({
   },
   name: {
     fontFamily: FONTS.bold,
-    fontSize: 30,
-    fontWeight: '600',
-    letterSpacing: 4.2,
+    fontSize: 32,
+    fontWeight: '700',
+    letterSpacing: 5,
     color: COLORS.text.primary,
   },
   tag: {
-    marginTop: 10,
+    marginTop: 12,
     fontFamily: FONTS.medium,
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '500',
-    letterSpacing: 3.2,
+    letterSpacing: 3.4,
     color: COLORS.text.muted,
     textTransform: 'uppercase',
   },
   hint: {
     position: 'absolute',
+    alignSelf: 'center',
     fontFamily: FONTS.medium,
     fontSize: 10,
     letterSpacing: 2,
-    color: 'rgba(255,255,255,0.28)',
+    color: 'rgba(255,255,255,0.32)',
     textTransform: 'uppercase',
   },
 });
