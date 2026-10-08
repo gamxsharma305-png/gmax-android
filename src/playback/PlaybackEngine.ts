@@ -30,6 +30,8 @@ type EngineEvents = {
   onStatus: (status: PlaybackStatus) => void;
   onComplete: () => void;
   onError: (error: unknown) => void;
+  onRemoteNext: () => void;
+  onRemotePrevious: () => void;
 };
 
 export class PlaybackEngine {
@@ -49,6 +51,7 @@ export class PlaybackEngine {
   private lockScreenActive = false;
   private lockScreenTrack: Track | null = null;
   private lockScreenSynced = false;
+  private remoteSubs: { remove: () => void }[] = [];
 
   on<K extends keyof EngineEvents>(event: K, handler: EngineEvents[K]): void {
     this.listeners[event] = handler;
@@ -147,7 +150,6 @@ export class PlaybackEngine {
       this.status = { ...IDLE_STATUS, isBuffering: true, volume: this.desiredVolume };
       this.listeners.onStatus?.(this.status);
 
-      // Local offline files must NOT send HTTP headers — breaks expo-audio on Android
       const isLocal =
         stream.url.startsWith('file://') ||
         stream.resolvedBy === 'local' ||
@@ -263,11 +265,20 @@ export class PlaybackEngine {
         return;
       }
 
+      // ±10s seek + next/previous (when expo-audio supports next/prev buttons)
       this.player?.setActiveForLockScreen(true, metadata, {
         showSeekForward: true,
         showSeekBackward: true,
+        showNextTrack: true,
+        showPreviousTrack: true,
+      } as {
+        showSeekForward: boolean;
+        showSeekBackward: boolean;
+        showNextTrack?: boolean;
+        showPreviousTrack?: boolean;
       });
       this.lockScreenActive = true;
+      this.attachRemoteCommandListeners();
     } catch {
       // optional
     }
@@ -297,9 +308,50 @@ export class PlaybackEngine {
     }
   }
 
+  private attachRemoteCommandListeners(): void {
+    const player = this.player as (AudioPlayer & {
+      addListener?: (event: string, cb: () => void) => { remove: () => void };
+    }) | null;
+    if (!player?.addListener) return;
+
+    this.detachRemoteCommandListeners();
+
+    const nextEvents = ['remoteNext', 'onRemoteNextTrack', 'mediaNext', 'skipToNext'];
+    const prevEvents = ['remotePrevious', 'onRemotePreviousTrack', 'mediaPrevious', 'skipToPrevious'];
+
+    for (const ev of nextEvents) {
+      try {
+        const sub = player.addListener(ev, () => this.listeners.onRemoteNext?.());
+        if (sub?.remove) this.remoteSubs.push(sub);
+      } catch {
+        /* unsupported */
+      }
+    }
+    for (const ev of prevEvents) {
+      try {
+        const sub = player.addListener(ev, () => this.listeners.onRemotePrevious?.());
+        if (sub?.remove) this.remoteSubs.push(sub);
+      } catch {
+        /* unsupported */
+      }
+    }
+  }
+
+  private detachRemoteCommandListeners(): void {
+    for (const s of this.remoteSubs) {
+      try {
+        s.remove();
+      } catch {
+        /* ok */
+      }
+    }
+    this.remoteSubs = [];
+  }
+
   private clearLockScreen(): void {
     if (Platform.OS === 'web' || !this.lockScreenActive) return;
 
+    this.detachRemoteCommandListeners();
     try {
       this.player?.clearLockScreenControls();
     } catch {
