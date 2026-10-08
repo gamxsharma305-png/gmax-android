@@ -11,6 +11,7 @@ import SettingsScreen from '../screens/Settings';
 import NowPlayingScreen from '../screens/NowPlaying';
 import PaywallScreen from '../screens/Paywall';
 import ImportSpotifyPlaylistScreen from '../screens/ImportSpotifyPlaylist';
+import { trackPage } from '../services/AnalyticsService';
 
 const Stack = createNativeStackNavigator();
 
@@ -31,7 +32,22 @@ export const RootNavigator = () => {
   const initialRoute = profile.completed ? 'Main' : 'Onboarding';
 
   return (
-    <NavigationContainer theme={GmaxTheme}>
+    <NavigationContainer
+      theme={GmaxTheme}
+      onStateChange={(state) => {
+        try {
+          if (!state) return;
+          let route = state.routes[state.index];
+          while (route?.state && typeof route.state.index === 'number') {
+            route = route.state.routes[route.state.index];
+          }
+          const name = route?.name;
+          if (name) trackPage(String(name));
+        } catch {
+          /* ok */
+        }
+      }}
+    >
       <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
         <Stack.Screen name="Onboarding" component={OnboardingScreen} />
         <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />

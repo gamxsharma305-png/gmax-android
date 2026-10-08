@@ -12,6 +12,7 @@ import { GSplash } from './src/components/GSplash';
 import { UpdateModal } from './src/components/UpdateModal';
 import { COLORS } from './src/constants/theme';
 import { checkForUpdate, UpdateInfo } from './src/services/UpdateService';
+import { trackAppOpen } from './src/services/AnalyticsService';
 import Constants from 'expo-constants';
 
 export default function App() {
@@ -22,6 +23,10 @@ export default function App() {
     Constants.expoConfig?.version ||
     Constants.nativeAppVersion ||
     '1.0.0';
+
+  useEffect(() => {
+    void trackAppOpen();
+  }, []);
 
   useEffect(() => {
     // After splash (~3.6s) so intro is not cut by update popup
