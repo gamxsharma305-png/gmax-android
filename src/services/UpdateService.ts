@@ -3,6 +3,8 @@
  * Version name/code stay frozen at 1.2.4 / 39 for install safety.
  * Primary: gmax-premium-api /api/app-update (no APK rebuild to change link).
  * Fallback: GitHub update.json
+ *
+ * Popup shows at most once per 24 hours for the same build (unless force).
  */
 import { Linking, Platform } from 'react-native';
 import Constants from 'expo-constants';
@@ -23,6 +25,10 @@ const UPDATE_MANIFEST_URL =
 const UPDATE_API_URL = 'https://gmax-premium-api.vercel.app/api/app-update';
 
 const STORAGE_APPLIED = 'gmax_update_applied_key';
+/** JSON: { key: string, at: number } — last time popup was shown for a build */
+const STORAGE_LAST_SHOWN = 'gmax_update_last_shown';
+
+const SHOW_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 function currentVersionCode(): number {
   const android = Constants.expoConfig?.android as { versionCode?: number } | undefined;
@@ -63,6 +69,36 @@ export async function markUpdateApplied(
     await AsyncStorage.setItem(STORAGE_APPLIED, key);
   } catch {
     /* ok */
+  }
+}
+
+/** Call when update modal is actually shown — enforces 24h cooldown */
+export async function markUpdateShown(
+  remote: Pick<UpdateInfo, 'buildId' | 'apkUrl'>
+): Promise<void> {
+  const key = updateKey(remote);
+  if (!key) return;
+  try {
+    await AsyncStorage.setItem(
+      STORAGE_LAST_SHOWN,
+      JSON.stringify({ key, at: Date.now() })
+    );
+  } catch {
+    /* ok */
+  }
+}
+
+async function wasShownWithin24h(key: string): Promise<boolean> {
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_LAST_SHOWN);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as { key?: string; at?: number };
+    if (!parsed?.key || parsed.key !== key) return false;
+    const at = Number(parsed.at) || 0;
+    if (!at) return false;
+    return Date.now() - at < SHOW_COOLDOWN_MS;
+  } catch {
+    return false;
   }
 }
 
@@ -134,7 +170,14 @@ export async function checkForUpdate(_legacyVersionArg?: string): Promise<{
 
     const codeNewer = remoteCode > localCode;
     const sameCodeNewBuild = !codeNewer && !!key;
-    const available = codeNewer || sameCodeNewBuild;
+    let available = codeNewer || sameCodeNewBuild;
+
+    // Same build: show popup at most once every 24 hours (force always shows)
+    if (available && key && !remote.force) {
+      if (await wasShownWithin24h(key)) {
+        available = false;
+      }
+    }
 
     return {
       available,
