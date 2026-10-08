@@ -24,6 +24,7 @@ export default function App() {
     '1.0.0';
 
   useEffect(() => {
+    // After splash (~3.6s) so intro is not cut by update popup
     const t = setTimeout(() => {
       void (async () => {
         try {
@@ -36,7 +37,7 @@ export default function App() {
           // network / parse — silent
         }
       })();
-    }, 1800);
+    }, 4200);
     return () => clearTimeout(t);
   }, []);
 
@@ -51,7 +52,9 @@ export default function App() {
                   <RootNavigator />
                   <YouTubeHost />
                   <StatusBar style="light" backgroundColor="#050707" />
-                  {showSplash ? <GSplash onDone={() => setShowSplash(false)} /> : null}
+                  {showSplash ? (
+                    <GSplash minMs={3600} onDone={() => setShowSplash(false)} />
+                  ) : null}
                   {updateRemote ? (
                     <UpdateModal
                       visible={showUpdate}
