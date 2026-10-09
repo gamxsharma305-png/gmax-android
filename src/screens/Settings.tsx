@@ -297,6 +297,19 @@ export default function SettingsScreen() {
               thumbColor="#fff"
             />
           </View>
+          <Divider />
+          <View style={styles.toggleRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>iOS glass tab bar</Text>
+              <Text style={styles.rowHint}>Floating blur tabs — Instagram style</Text>
+            </View>
+            <Switch
+              value={!!settings.glassTabBar}
+              onValueChange={(v) => updateSettings({ glassTabBar: v })}
+              trackColor={{ false: COLORS.surfaceLight, true: COLORS.accent.green }}
+              thumbColor="#fff"
+            />
+          </View>
         </View>
 
         <Text style={styles.sectionLabel}>FEATURES</Text>
