@@ -18,8 +18,11 @@ import {
   GripVertical,
   ListOrdered,
   Check,
+  Download,
 } from 'lucide-react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useSubscription } from '../hooks/useSubscription';
+import { downloadTracksBatch } from '../services/OfflineService';
 import DraggableFlatList, {
   RenderItemParams,
   ScaleDecorator,
@@ -65,6 +68,9 @@ export default function PlaylistDetailScreen() {
 
   const [addingTrack, setAddingTrack] = useState<Track | null>(null);
   const [reorderMode, setReorderMode] = useState(false);
+  const { isPremium } = useSubscription();
+  const [dlBusy, setDlBusy] = useState(false);
+  const [dlProgress, setDlProgress] = useState('');
 
   const playlist = useMemo(
     () =>
@@ -93,6 +99,31 @@ export default function PlaylistDetailScreen() {
   const queueAll = useCallback(() => {
     if (tracks.length) addToQueue(tracks);
   }, [tracks, addToQueue]);
+
+  const downloadAll = useCallback(async () => {
+    if (!tracks.length || dlBusy) return;
+    if (!isPremium) {
+      navigation.navigate('Paywall' as never);
+      return;
+    }
+    setDlBusy(true);
+    setDlProgress('Starting…');
+    try {
+      const { completed, failed } = await downloadTracksBatch(tracks, {
+        concurrency: 2,
+        onOverall: (done, fail, total) => {
+          setDlProgress(`${done + fail}/${total} · ${done} ok`);
+        },
+      });
+      setDlProgress(
+        `Done · ${completed} saved` + (failed ? ` · ${failed} failed` : '')
+      );
+    } catch (e) {
+      setDlProgress(e instanceof Error ? e.message : 'Download failed');
+    } finally {
+      setDlBusy(false);
+    }
+  }, [tracks, dlBusy, isPremium, navigation]);
 
   const onTrackPress = useCallback(
     (track: Track) => {
@@ -207,6 +238,13 @@ export default function PlaylistDetailScreen() {
         >
           <ListPlus color={COLORS.text.primary} size={20} />
         </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.iconAction, (!tracks.length || dlBusy) && styles.actionDisabled]}
+          onPress={() => { void downloadAll(); }}
+          disabled={!tracks.length || dlBusy}
+        >
+          <Download color={isPremium ? COLORS.accent.green : COLORS.text.muted} size={20} />
+        </TouchableOpacity>
         {canReorder && (
           <TouchableOpacity
             style={[styles.iconAction, reorderMode && styles.reorderActive]}
@@ -220,6 +258,9 @@ export default function PlaylistDetailScreen() {
           </TouchableOpacity>
         )}
       </View>
+      {!!dlProgress && (
+        <Text style={styles.reorderHint}>{dlProgress}</Text>
+      )}
       {reorderMode && (
         <Text style={styles.reorderHint}>
           Grip long-press karke upar/neeche drag karo
