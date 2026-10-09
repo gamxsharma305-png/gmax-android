@@ -44,7 +44,7 @@ type Props = {
 };
 
 /**
- * Full-screen GMAX intro — complete logo (not cut), solid background, then fade.
+ * Full-screen GMAX intro — complete logo centered, solid background.
  */
 export function GSplash({ onDone, minMs = 3400 }: Props) {
   const { width, height } = useWindowDimensions();
@@ -148,23 +148,14 @@ export function GSplash({ onDone, minMs = 3400 }: Props) {
   });
 
   const svgSize = Math.min(
-    200,
-    Math.round(Math.min(width * 0.48, height * 0.28)),
-    Math.max(140, Math.round(width * 0.42))
+    220,
+    Math.round(Math.min(width * 0.52, height * 0.32)),
+    Math.max(160, Math.round(width * 0.45))
   );
 
   return (
     <Pressable onPress={finish} style={styles.root}>
-      <Animated.View
-        style={[
-          styles.wrap,
-          {
-            opacity: outOp,
-            paddingTop: insets.top,
-            paddingBottom: insets.bottom,
-          },
-        ]}
-      >
+      <Animated.View style={[styles.wrap, { opacity: outOp }]}>
         <View style={styles.stage}>
           <Animated.View style={{ opacity: logoOp }}>
             <View style={[styles.svgWrap, { width: svgSize, height: svgSize }]}>
@@ -248,17 +239,28 @@ export function GSplash({ onDone, minMs = 3400 }: Props) {
 
 const styles = StyleSheet.create({
   root: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 999,
-    elevation: 999,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
+    zIndex: 99999,
+    elevation: 99999,
+    backgroundColor: '#050707',
   },
   wrap: {
-    ...StyleSheet.absoluteFillObject,
+    flex: 1,
+    width: '100%',
+    height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#050707',
   },
   stage: {
+    flex: 1,
+    width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 28,
