@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, View, Image, TouchableOpacity, ActivityIndicator, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Play, Pause, MonitorSpeaker } from 'lucide-react-native';
 import { Track } from '../../core/types';
 import { useProgress } from '../../hooks/usePlayer';
@@ -27,33 +28,43 @@ const MiniPlayerProgress: React.FC = React.memo(() => {
 });
 MiniPlayerProgress.displayName = 'MiniPlayerProgress';
 
-export const MiniPlayer: React.FC<MiniPlayerProps> = ({ 
-  track, 
-  isPlaying, 
-  onPress, 
+export const MiniPlayer: React.FC<MiniPlayerProps> = ({
+  track,
+  isPlaying,
+  onPress,
   onPlayPause,
-  tabBarHeight = Platform.OS === 'ios' ? 88 : 68,
-  isLoading = false
+  tabBarHeight,
+  isLoading = false,
 }) => {
+  const insets = useSafeAreaInsets();
   const [showSource, setShowSource] = useState(false);
   if (!track) return null;
 
+  // Sit above tab bar + system nav (never under phone buttons)
+  const systemBottom = Math.max(insets.bottom, Platform.OS === 'android' ? 28 : 8);
+  const tabH = tabBarHeight ?? 52 + systemBottom;
+  const bottom = tabH + 6;
+
   return (
-    <TouchableOpacity 
-      activeOpacity={0.9} 
+    <TouchableOpacity
+      activeOpacity={0.9}
       onPress={onPress}
-      style={[styles.positionContainer, { bottom: tabBarHeight }]}
+      style={[styles.positionContainer, { bottom }]}
     >
       <View style={[styles.container, SHADOWS.glass]}>
         <View style={styles.content}>
           <Image source={{ uri: track.albumImageUrl }} style={styles.image} />
           <View style={styles.infoContainer}>
-            <Text style={styles.title} numberOfLines={1}>{track.title}</Text>
-            <Text style={styles.artist} numberOfLines={1}>{track.artist.name}</Text>
+            <Text style={styles.title} numberOfLines={1}>
+              {track.title}
+            </Text>
+            <Text style={styles.artist} numberOfLines={1}>
+              {track.artist.name}
+            </Text>
           </View>
           <View style={styles.controls}>
             <TouchableOpacity style={styles.iconButton} onPress={() => setShowSource(true)}>
-               <MonitorSpeaker color={COLORS.text.secondary} size={20} />
+              <MonitorSpeaker color={COLORS.text.secondary} size={20} />
             </TouchableOpacity>
             <TouchableOpacity style={styles.playButton} onPress={onPlayPause}>
               {isLoading ? (
@@ -135,5 +146,5 @@ const styles = StyleSheet.create({
   progressFill: {
     height: '100%',
     backgroundColor: COLORS.player.progressFill,
-  }
+  },
 });

@@ -21,9 +21,14 @@ export const TabNavigator = () => {
   const { settings } = useLibrary();
   const glass = !!settings.glassTabBar;
 
-  // Never sit under system nav / gesture bar
-  const bottomPad = Math.max(insets.bottom, Platform.OS === 'android' ? 12 : 8);
-  const barHeight = 52 + bottomPad;
+  // Android 3-button / gesture bar — never sit under system nav
+  // insets.bottom can be 0 on some devices; force a solid minimum
+  const systemBottom = Math.max(
+    insets.bottom,
+    Platform.OS === 'android' ? 28 : 8
+  );
+  const iconRow = 52;
+  const barHeight = iconRow + systemBottom;
 
   const tabBarStyle = useMemo(() => {
     if (glass) {
@@ -31,7 +36,7 @@ export const TabNavigator = () => {
         position: 'absolute' as const,
         left: 16,
         right: 16,
-        bottom: Math.max(insets.bottom, 10),
+        bottom: systemBottom + 6,
         height: 58,
         borderRadius: 28,
         borderTopWidth: 0,
@@ -52,14 +57,14 @@ export const TabNavigator = () => {
       right: 0,
       bottom: 0,
       height: barHeight,
-      paddingBottom: bottomPad,
+      paddingBottom: systemBottom,
       paddingTop: 6,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: COLORS.hairline,
       backgroundColor: colors.surfaceRaised,
       elevation: 12,
     };
-  }, [glass, barHeight, bottomPad, insets.bottom, colors]);
+  }, [glass, barHeight, systemBottom, colors]);
 
   return (
     <Tab.Navigator

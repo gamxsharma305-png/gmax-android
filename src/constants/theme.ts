@@ -27,7 +27,7 @@ export const COLORS = {
 };
 
 export const SIZES = {
-  bottomInset: 150,
+  bottomInset: 180,
   xs: 4,
   sm: 8,
   md: 16,
