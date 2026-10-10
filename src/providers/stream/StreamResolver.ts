@@ -1,6 +1,7 @@
 import { fetchJson } from '../../core/http';
 import { appError, appErrorWithMessage, AppError, toAppError } from '../../core/errors';
 import { ResolvedStream, Track } from '../../core/types';
+import { findOfflineFileOnDisk } from '../../services/OfflineService';
 import { NativeStreamSource } from './NativeStreamSource';
 import { TitleMatchStreamSource } from './TitleMatchStreamSource';
 
@@ -98,33 +99,17 @@ function endpointUrl(endpoint: ResolverEndpoint, sourceId: string): string {
       return `${base}/api/v1/videos/${sourceId}`;
     case 'piped':
       return `${base}/streams/${sourceId}`;
-    case 'custom':
-      return base.includes('{id}') ? base.replace('{id}', sourceId) : `${base}/${sourceId}`;
-  }
-}
-
-function parseFor(endpoint: ResolverEndpoint, body: any): AudioFormat[] {
-  switch (endpoint.kind) {
-    case 'invidious':
-      return parseInvidious(body);
-    case 'piped':
-      return parsePiped(body);
-    case 'custom':
-      return parseCustom(body);
+    default:
+      return `${base}/resolve?id=${encodeURIComponent(sourceId)}`;
   }
 }
 
 export class EndpointStreamSource implements StreamSource {
-  readonly id = 'endpoint';
-
+  readonly id = 'endpoints';
   private endpoints: ResolverEndpoint[] = [];
-  private preferred?: string;
 
   setEndpoints(endpoints: ResolverEndpoint[]): void {
-    this.endpoints = endpoints.filter((e) => /^https?:\/\//.test(e.url));
-    if (this.preferred && !this.endpoints.some((e) => e.url === this.preferred)) {
-      this.preferred = undefined;
-    }
+    this.endpoints = endpoints.filter((e) => e?.url?.startsWith('http'));
   }
 
   getEndpoints(): ResolverEndpoint[] {
@@ -132,80 +117,71 @@ export class EndpointStreamSource implements StreamSource {
   }
 
   canHandle(track: Track): boolean {
-    return track.provider === 'youtube' && !!track.sourceId && this.endpoints.length > 0;
+    return !!track.sourceId && this.endpoints.length > 0;
   }
 
   async resolve(track: Track, signal?: AbortSignal): Promise<ResolvedStream> {
-    const ordered = [...this.endpoints].sort((a, b) =>
-      a.url === this.preferred ? -1 : b.url === this.preferred ? 1 : 0
-    );
+    if (!track.sourceId) {
+      throw appError('source_unavailable', 'No source id');
+    }
 
-    let lastError: AppError | undefined;
-
-    for (const endpoint of ordered) {
+    let lastErr: unknown;
+    for (const endpoint of this.endpoints) {
       if (signal?.aborted) throw appError('timeout');
-
       try {
-        const body = await fetchJson<any>(endpointUrl(endpoint, track.sourceId), {
-          timeoutMs: 10_000,
-          retries: 0,
-          signal,
-        });
-
-        const reason: string | undefined = body?.error ?? body?.reason;
-        if (reason) {
-          if (/region|country|not available in/i.test(reason)) throw appError('region_restricted', reason);
-          if (/private|removed|deleted|unavailable/i.test(reason)) {
-            throw appError('track_unavailable', reason);
-          }
-          throw appError('source_unavailable', reason);
+        const url = endpointUrl(endpoint, track.sourceId);
+        const body = await fetchJson(url, { signal, timeoutMs: 12_000 });
+        const formats =
+          endpoint.kind === 'invidious'
+            ? parseInvidious(body)
+            : endpoint.kind === 'piped'
+              ? parsePiped(body)
+              : parseCustom(body);
+        const best = bestAudio(formats);
+        if (!best?.url) {
+          lastErr = new Error(`No audio on ${endpoint.url}`);
+          continue;
         }
-
-        const best = bestAudio(parseFor(endpoint, body));
-        if (!best?.url) throw appError('source_unavailable', 'No audio format returned');
-
-        this.preferred = endpoint.url;
         return {
           url: best.url,
-          mimeType: best.mimeType,
-          bitrate: best.bitrate,
           expiresAt: Date.now() + STREAM_TTL,
           resolvedBy: `${this.id}:${endpoint.url}`,
+          mimeType: best.mimeType,
         };
       } catch (e) {
-        const err = toAppError(e, 'source_unavailable');
-        if (err.kind === 'track_unavailable' || err.kind === 'region_restricted') throw err;
-        lastError = err;
+        lastErr = e;
       }
     }
 
-    throw lastError ?? appError('source_unavailable');
+    throw toAppError(lastErr ?? new Error('All endpoints failed'), 'source_unavailable');
   }
 }
 
-export class StreamResolverChain {
+export const endpointSource = new EndpointStreamSource();
+
+class StreamResolverImpl {
   private sources: StreamSource[] = [];
   private cache = new Map<string, ResolvedStream>();
   private inflight = new Map<string, Promise<ResolvedStream>>();
 
-  use(source: StreamSource): this {
-    this.sources.push(source);
-    return this;
+  constructor() {
+    this.sources = [
+      new LocalStreamSource(),
+      new DirectStreamSource(),
+      new NativeStreamSource(),
+      endpointSource,
+      new TitleMatchStreamSource(),
+    ];
   }
 
-  find<T extends StreamSource>(id: string): T | undefined {
-    return this.sources.find((s) => s.id === id) as T | undefined;
-  }
-
-  canResolve(track: Track): boolean {
-    return this.sources.some((s) => s.canHandle(track));
-  }
-
-  peek(track: Track): ResolvedStream | undefined {
+  peek(track: Track): ResolvedStream | null {
     const hit = this.cache.get(track.id);
-    if (hit && hit.expiresAt > Date.now()) return hit;
-    if (hit) this.cache.delete(track.id);
-    return undefined;
+    if (!hit) return null;
+    if (hit.expiresAt < Date.now()) {
+      this.cache.delete(track.id);
+      return null;
+    }
+    return hit;
   }
 
   invalidate(track: Track): void {
@@ -220,6 +196,20 @@ export class StreamResolverChain {
         expiresAt: Date.now() + LOCAL_TTL,
         resolvedBy: 'local',
       };
+    }
+
+    // Bulk download may have left files on disk without Library index
+    try {
+      const disk = await findOfflineFileOnDisk(track.id);
+      if (disk) {
+        return {
+          url: disk,
+          expiresAt: Date.now() + LOCAL_TTL,
+          resolvedBy: 'local-disk',
+        };
+      }
+    } catch {
+      /* fall through to network */
     }
 
     const cached = this.peek(track);
@@ -254,99 +244,48 @@ export class StreamResolverChain {
     }
 
     return new Promise<ResolvedStream>((resolve, reject) => {
-      let pending = usable.length;
-      let lastError: AppError | undefined;
       let settled = false;
-      const childControllers: AbortController[] = [];
+      const errors: unknown[] = [];
+      const child = signal ? AbortController : null;
+      // race remaining sources
+      const rest = usable.filter((s) => s.id !== 'local' && s.id !== 'direct');
 
-      const settleOk = (stream: ResolvedStream) => {
+      const finishOk = (stream: ResolvedStream) => {
         if (settled) return;
         settled = true;
-        for (const c of childControllers) {
-          try {
-            c.abort();
-          } catch {
-            /* ok */
-          }
-        }
         this.cache.set(track.id, stream);
         resolve(stream);
       };
 
-      const settleFail = (err: AppError) => {
-        lastError = err;
-        pending -= 1;
-        if (pending <= 0 && !settled) {
-          reject(lastError ?? appError('source_unavailable'));
-        }
+      const finishErr = () => {
+        if (settled) return;
+        if (errors.length < rest.length) return;
+        settled = true;
+        reject(
+          toAppError(errors[0] ?? new Error('All sources failed'), 'source_unavailable')
+        );
       };
 
-      const onParentAbort = () => {
-        for (const c of childControllers) {
-          try {
-            c.abort();
-          } catch {
-            /* ok */
-          }
-        }
-        if (!settled) {
-          settled = true;
-          reject(appError('timeout'));
-        }
-      };
-      signal?.addEventListener('abort', onParentAbort);
+      if (!rest.length) {
+        reject(appError('source_unavailable', 'No stream source'));
+        return;
+      }
 
-      for (const source of usable) {
-        const child = new AbortController();
-        childControllers.push(child);
-
-        const timer = setTimeout(() => {
-          try {
-            child.abort();
-          } catch {
-            /* ok */
-          }
-        }, source.id === 'native-newpipe' ? 14_000 : 10_000);
-
+      for (const source of rest) {
         source
-          .resolve(track, child.signal)
-          .then((stream) => {
-            clearTimeout(timer);
-            if (signal?.aborted) {
-              settleFail(appError('timeout'));
-              return;
-            }
-            settleOk(stream);
-          })
+          .resolve(track, signal)
+          .then(finishOk)
           .catch((e) => {
-            clearTimeout(timer);
-            const err = toAppError(e, 'source_unavailable');
-            if (err.kind === 'track_unavailable' || err.kind === 'region_restricted') {
-              if (!settled) {
-                settled = true;
-                for (const c of childControllers) {
-                  try {
-                    c.abort();
-                  } catch {
-                    /* ok */
-                  }
-                }
-                reject(err);
-              }
-              return;
-            }
-            settleFail(err);
+            errors.push(e);
+            finishErr();
           });
       }
     });
   }
+
+  canResolve(track: Track): boolean {
+    return this.sources.some((s) => s.canHandle(track));
+  }
 }
 
-export const endpointSource = new EndpointStreamSource();
-
-export const streamResolver = new StreamResolverChain()
-  .use(new LocalStreamSource())
-  .use(new DirectStreamSource())
-  .use(new NativeStreamSource())
-  .use(new TitleMatchStreamSource())
-  .use(endpointSource);
+export const streamResolver = new StreamResolverImpl();
