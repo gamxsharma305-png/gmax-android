@@ -5,7 +5,12 @@ import {
   STORAGE_KEYS,
 } from '../core/storage';
 import { Playlist, Track } from '../core/types';
-import { downloadTrackAudio, localFileExists, removeOfflineFile } from './OfflineService';
+import {
+  downloadTrackAudio,
+  localFileExists,
+  removeOfflineFile,
+  findOfflineFileOnDisk,
+} from './OfflineService';
 
 export type Gender = 'male' | 'female' | 'unspecified';
 
@@ -306,6 +311,31 @@ class LibraryServiceImpl {
     this.notifyChanged();
   }
 
+  /** Attach localUri to Downloads playlist without re-downloading. */
+  registerOffline(track: Track, localUri: string): void {
+    if (!localUri) return;
+    const offlineTrack: Track = { ...stripStream(track), localUri };
+    let pl = this.playlists.find((p) => p.name === OFFLINE_PLAYLIST_NAME);
+    if (!pl) {
+      this.createPlaylist(OFFLINE_PLAYLIST_NAME, {
+        description: 'Tracks saved for offline',
+        tracks: [offlineTrack],
+        coverImageUrl: track.albumImageUrl,
+      });
+      this.notifyChanged();
+      return;
+    }
+    const idx = pl.tracks.findIndex((t) => t.id === track.id);
+    if (idx >= 0) {
+      const updated = [...pl.tracks];
+      updated[idx] = { ...updated[idx], localUri };
+      this.updatePlaylist(pl.id, { tracks: updated });
+    } else {
+      this.addToPlaylist(pl.id, offlineTrack);
+    }
+    this.notifyChanged();
+  }
+
   async saveOffline(
     track: Track,
     signal?: AbortSignal
@@ -349,7 +379,24 @@ class LibraryServiceImpl {
 
   async hasOfflineFile(trackId: string): Promise<boolean> {
     const t = this.getOfflineTrack(trackId);
-    return localFileExists(t?.localUri);
+    if (t?.localUri && (await localFileExists(t.localUri))) return true;
+    const disk = await findOfflineFileOnDisk(trackId);
+    if (disk) {
+      if (t) this.registerOffline(t, disk);
+      return true;
+    }
+    return false;
+  }
+
+  async resolveOfflineUri(trackId: string): Promise<string | undefined> {
+    const t = this.getOfflineTrack(trackId);
+    if (t?.localUri && (await localFileExists(t.localUri))) return t.localUri;
+    const disk = await findOfflineFileOnDisk(trackId);
+    if (disk) {
+      if (t) this.registerOffline({ ...t, id: trackId }, disk);
+      return disk;
+    }
+    return undefined;
   }
 
   async removeOffline(trackId: string): Promise<void> {
