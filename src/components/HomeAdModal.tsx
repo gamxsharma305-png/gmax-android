@@ -8,10 +8,12 @@ import {
   View,
   Image,
   Dimensions,
+  StatusBar,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { COLORS, FONTS, SIZES } from '../constants/theme';
+import { X } from 'lucide-react-native';
+import { FONTS } from '../constants/theme';
 import type { RemoteAdItem, RemoteAds } from '../services/RemoteConfigService';
 
 type Props = {
@@ -20,12 +22,16 @@ type Props = {
   onClose: () => void;
 };
 
-const { height: SCREEN_H } = Dimensions.get('window');
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
+/**
+ * Full-screen ad — Google Play install-ad layout:
+ * top thin progress bar · video fills screen · bottom brand + Install CTA
+ */
 export function HomeAdModal({ visible, ads, onClose }: Props) {
   const insets = useSafeAreaInsets();
   const items = useMemo(
-    () => (ads.items || []).filter((a) => a?.id).slice(0, ads.maxAds || 2),
+    () => (ads.items || []).filter((a) => a?.id && a.enabled !== false).slice(0, ads.maxAds || 2),
     [ads.items, ads.maxAds]
   );
   const [index, setIndex] = useState(0);
@@ -45,6 +51,13 @@ export function HomeAdModal({ visible, ads, onClose }: Props) {
   };
 
   useEffect(() => {
+    if (!visible) {
+      setIndex(0);
+      return;
+    }
+  }, [visible]);
+
+  useEffect(() => {
     if (!visible || !current) return;
     setProgress(0);
     setCanSkip(false);
@@ -59,7 +72,7 @@ export function HomeAdModal({ visible, ads, onClose }: Props) {
         clearTimer();
         setCanSkip(true);
       }
-    }, 250);
+    }, 200);
     return clearTimer;
   }, [visible, current?.id, skipRatio]);
 
@@ -88,74 +101,111 @@ export function HomeAdModal({ visible, ads, onClose }: Props) {
 
   if (!current) return null;
 
+  const brand = current.brandName || current.title || 'GMAX';
+  const subtitle = current.subtitle || current.description || '';
+  const cta = current.linkLabel || current.ctaLabel || 'Install';
+  const iconUri = current.brandIcon || current.posterUrl;
+
   const videoHtml = current.videoUrl
-    ? `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
-<style>*{margin:0;padding:0;background:#000}html,body{width:100%;height:100%;overflow:hidden}
-video{width:100%;height:100%;object-fit:contain;background:#000}</style></head>
-<body><video id="v" playsinline autoplay muted controls
+    ? `<!DOCTYPE html><html><head>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#000;overflow:hidden}
+video{width:100%;height:100%;object-fit:cover;background:#000}
+</style></head>
+<body>
+<video id="v" playsinline webkit-playsinline autoplay muted
  src="${String(current.videoUrl).replace(/"/g, '')}"
  poster="${String(current.posterUrl || '').replace(/"/g, '')}"></video>
 <script>
 var v=document.getElementById('v');
-v.muted=false;
-v.play().catch(function(){v.muted=true;v.play().catch(function(){})});
+function tryPlay(){v.play().catch(function(){v.muted=true;v.play().catch(function(){})})}
+v.addEventListener('loadeddata',tryPlay);tryPlay();
 </script></body></html>`
     : null;
 
+  const skipLeft = Math.max(0, Math.ceil((skipRatio - progress) * durationGuess));
+
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <View style={[styles.sheet, { paddingBottom: insets.bottom + 12, maxHeight: SCREEN_H * 0.72 }]}>
-          <Text style={styles.badge}>SPONSORED</Text>
-          {!!current.title && <Text style={styles.title}>{current.title}</Text>}
+    <Modal visible={visible} animationType="fade" onRequestClose={canSkip ? onClose : undefined}>
+      <StatusBar barStyle="light-content" backgroundColor="#000" />
+      <View style={styles.root}>
+        {/* Full-bleed video */}
+        <View style={styles.videoLayer}>
+          {videoHtml ? (
+            <WebView
+              source={{ html: videoHtml }}
+              style={styles.webview}
+              allowsInlineMediaPlayback
+              mediaPlaybackRequiresUserAction={false}
+              scrollEnabled={false}
+              allowsFullscreenVideo={false}
+            />
+          ) : current.posterUrl ? (
+            <Image source={{ uri: current.posterUrl }} style={styles.poster} resizeMode="cover" />
+          ) : (
+            <View style={[styles.poster, styles.posterEmpty]}>
+              <Text style={styles.posterEmptyText}>Ad</Text>
+            </View>
+          )}
+        </View>
 
-          <View style={styles.videoBox}>
-            {videoHtml ? (
-              <WebView
-                source={{ html: videoHtml }}
-                style={styles.webview}
-                allowsInlineMediaPlayback
-                mediaPlaybackRequiresUserAction={false}
-                scrollEnabled={false}
-              />
-            ) : current.posterUrl ? (
-              <Image source={{ uri: current.posterUrl }} style={styles.poster} resizeMode="cover" />
-            ) : (
-              <View style={[styles.poster, styles.posterEmpty]}>
-                <Text style={styles.posterEmptyText}>Ad</Text>
-              </View>
-            )}
-          </View>
-
+        {/* Top progress bar (Google-style yellow) */}
+        <View style={[styles.topBar, { paddingTop: insets.top + 6 }]}>
           <View style={styles.progressTrack}>
             <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
           </View>
-
-          {!!current.linkUrl && (
-            <TouchableOpacity style={styles.linkBtn} onPress={() => void onOpenLink()} activeOpacity={0.85}>
-              <Text style={styles.linkText}>{current.linkLabel || 'Link kholo'}</Text>
+          {canSkip ? (
+            <TouchableOpacity style={styles.closeBtn} onPress={onSkip} hitSlop={12}>
+              <X color="#fff" size={18} strokeWidth={2.5} />
             </TouchableOpacity>
+          ) : (
+            <View style={styles.skipTimer}>
+              <Text style={styles.skipTimerText}>{skipLeft}s</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Bottom gradient + install bar */}
+        <View style={[styles.bottom, { paddingBottom: Math.max(insets.bottom, 14) + 8 }]}>
+          {!!subtitle && (
+            <Text style={styles.caption} numberOfLines={2}>
+              {subtitle}
+            </Text>
           )}
 
-          <View style={styles.row}>
+          <View style={styles.installRow}>
+            <View style={styles.brandRow}>
+              {iconUri ? (
+                <Image source={{ uri: iconUri }} style={styles.brandIcon} />
+              ) : (
+                <View style={[styles.brandIcon, styles.brandIconFallback]}>
+                  <Text style={styles.brandIconLetter}>{brand.slice(0, 1).toUpperCase()}</Text>
+                </View>
+              )}
+              <View style={styles.brandText}>
+                <Text style={styles.brandName} numberOfLines={1}>
+                  {brand}
+                </Text>
+                <Text style={styles.brandMeta} numberOfLines={1}>
+                  {current.storeLabel || 'Sponsored'}
+                </Text>
+              </View>
+            </View>
+
+            {!!current.linkUrl && (
+              <TouchableOpacity style={styles.installBtn} onPress={() => void onOpenLink()} activeOpacity={0.88}>
+                <Text style={styles.installText}>{cta}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {items.length > 1 && (
             <Text style={styles.counter}>
               {index + 1} / {items.length}
             </Text>
-            <TouchableOpacity
-              style={[styles.skipBtn, !canSkip && styles.skipDisabled]}
-              onPress={onSkip}
-              disabled={!canSkip}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.skipText}>
-                {canSkip
-                  ? index + 1 < items.length
-                    ? 'Agla ad →'
-                    : 'Band karo'
-                  : `Cut ${Math.max(0, Math.ceil((skipRatio - progress) * durationGuess))}s`}
-              </Text>
-            </TouchableOpacity>
-          </View>
+          )}
         </View>
       </View>
     </Modal>
@@ -163,89 +213,163 @@ v.play().catch(function(){v.muted=true;v.play().catch(function(){})});
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
+  root: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    justifyContent: 'flex-end',
+    backgroundColor: '#000',
+    width: SCREEN_W,
+    height: SCREEN_H,
   },
-  sheet: {
-    backgroundColor: COLORS.surfaceRaised,
-    borderTopLeftRadius: SIZES.radius.lg,
-    borderTopRightRadius: SIZES.radius.lg,
-    borderWidth: 1,
-    borderColor: COLORS.glassBorder,
-    paddingHorizontal: SIZES.lg,
-    paddingTop: SIZES.md,
-  },
-  badge: {
-    fontFamily: FONTS.medium,
-    fontSize: 10,
-    letterSpacing: 1.5,
-    color: COLORS.text.muted,
-    marginBottom: 4,
-  },
-  title: {
-    fontFamily: FONTS.bold,
-    fontSize: 16,
-    color: COLORS.text.primary,
-    marginBottom: 8,
-  },
-  videoBox: {
-    width: '100%',
-    height: SCREEN_H * 0.38,
-    borderRadius: SIZES.radius.md,
-    overflow: 'hidden',
+  videoLayer: {
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: '#000',
   },
-  webview: { flex: 1, backgroundColor: '#000' },
-  poster: { width: '100%', height: '100%' },
-  posterEmpty: { alignItems: 'center', justifyContent: 'center' },
-  posterEmptyText: { color: COLORS.text.muted, fontFamily: FONTS.medium },
+  webview: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  poster: {
+    width: '100%',
+    height: '100%',
+  },
+  posterEmpty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#111',
+  },
+  posterEmptyText: {
+    color: 'rgba(255,255,255,0.4)',
+    fontFamily: FONTS.medium,
+    fontSize: 16,
+  },
+  topBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    gap: 10,
+    zIndex: 20,
+  },
   progressTrack: {
+    flex: 1,
     height: 3,
-    backgroundColor: COLORS.glassBorder,
     borderRadius: 2,
-    marginTop: 10,
+    backgroundColor: 'rgba(255,255,255,0.25)',
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
-    backgroundColor: COLORS.accent.green,
+    backgroundColor: '#f5c518',
+    borderRadius: 2,
   },
-  linkBtn: {
-    marginTop: 12,
-    paddingVertical: 12,
-    borderRadius: SIZES.radius.md,
-    borderWidth: 1,
-    borderColor: COLORS.accent.green,
+  closeBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.45)',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  linkText: {
+  skipTimer: {
+    minWidth: 32,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  skipTimerText: {
+    color: '#fff',
     fontFamily: FONTS.bold,
-    fontSize: 14,
-    color: COLORS.accent.green,
+    fontSize: 12,
   },
-  row: {
+  bottom: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 16,
+    paddingTop: 48,
+    backgroundColor: 'transparent',
+    // soft fade over video
+    borderTopWidth: 0,
+    zIndex: 20,
+  },
+  caption: {
+    color: '#fff',
+    fontFamily: FONTS.medium,
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 14,
+    textShadowColor: 'rgba(0,0,0,0.7)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  installRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 12,
+    backgroundColor: 'rgba(28,28,30,0.92)',
+    borderRadius: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    gap: 12,
   },
-  counter: {
+  brandRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    minWidth: 0,
+  },
+  brandIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: '#2a2a2e',
+  },
+  brandIconFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  brandIconLetter: {
+    color: '#fff',
+    fontFamily: FONTS.bold,
+    fontSize: 18,
+  },
+  brandText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  brandName: {
+    color: '#fff',
+    fontFamily: FONTS.bold,
+    fontSize: 15,
+  },
+  brandMeta: {
+    color: 'rgba(255,255,255,0.55)',
     fontFamily: FONTS.regular,
     fontSize: 12,
-    color: COLORS.text.muted,
+    marginTop: 2,
   },
-  skipBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: SIZES.radius.md,
-    backgroundColor: COLORS.accent.green,
+  installBtn: {
+    backgroundColor: '#5b9cff',
+    paddingHorizontal: 22,
+    paddingVertical: 11,
+    borderRadius: 22,
   },
-  skipDisabled: { opacity: 0.45 },
-  skipText: {
+  installText: {
+    color: '#fff',
     fontFamily: FONTS.bold,
-    fontSize: 13,
-    color: COLORS.background,
+    fontSize: 14,
+  },
+  counter: {
+    marginTop: 8,
+    textAlign: 'center',
+    color: 'rgba(255,255,255,0.4)',
+    fontFamily: FONTS.regular,
+    fontSize: 11,
   },
 });
