@@ -23,6 +23,7 @@ import {
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { useSubscription } from '../hooks/useSubscription';
 import { downloadTracksBatch } from '../services/OfflineService';
+import { LibraryService } from '../services/LibraryService';
 import DraggableFlatList, {
   RenderItemParams,
   ScaleDecorator,
@@ -109,14 +110,25 @@ export default function PlaylistDetailScreen() {
     setDlBusy(true);
     setDlProgress('Starting…');
     try {
-      const { completed, failed } = await downloadTracksBatch(tracks, {
+      const { completed, failed, results } = await downloadTracksBatch(tracks, {
         concurrency: 2,
         onOverall: (done, fail, total) => {
           setDlProgress(`${done + fail}/${total} · ${done} ok`);
         },
       });
+      // Register each file so playback uses localUri (no network)
+      for (let i = 0; i < tracks.length; i++) {
+        const r = results[i];
+        if (r?.localUri) {
+          try {
+            LibraryService.registerOffline(tracks[i], r.localUri);
+          } catch {
+            /* ok */
+          }
+        }
+      }
       setDlProgress(
-        `Done · ${completed} saved` + (failed ? ` · ${failed} failed` : '')
+        `Done · ${completed} offline` + (failed ? ` · ${failed} failed` : '')
       );
     } catch (e) {
       setDlProgress(e instanceof Error ? e.message : 'Download failed');
@@ -240,7 +252,9 @@ export default function PlaylistDetailScreen() {
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.iconAction, (!tracks.length || dlBusy) && styles.actionDisabled]}
-          onPress={() => { void downloadAll(); }}
+          onPress={() => {
+            void downloadAll();
+          }}
           disabled={!tracks.length || dlBusy}
         >
           <Download color={isPremium ? COLORS.accent.green : COLORS.text.muted} size={20} />
@@ -258,9 +272,7 @@ export default function PlaylistDetailScreen() {
           </TouchableOpacity>
         )}
       </View>
-      {!!dlProgress && (
-        <Text style={styles.reorderHint}>{dlProgress}</Text>
-      )}
+      {!!dlProgress && <Text style={styles.reorderHint}>{dlProgress}</Text>}
       {reorderMode && (
         <Text style={styles.reorderHint}>
           Grip long-press karke upar/neeche drag karo
