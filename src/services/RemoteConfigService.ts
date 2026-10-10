@@ -19,8 +19,16 @@ export type RemoteAdItem = {
   videoUrl?: string;
   posterUrl?: string;
   title?: string;
+  /** Bottom caption under video */
+  subtitle?: string;
+  description?: string;
+  /** Brand / app name in install bar */
+  brandName?: string;
+  brandIcon?: string;
+  storeLabel?: string;
   linkUrl?: string;
   linkLabel?: string;
+  ctaLabel?: string;
 };
 
 export type RemoteAds = {
