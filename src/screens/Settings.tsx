@@ -2,6 +2,7 @@ import React, { useCallback, useState } from 'react';
 import {
   Keyboard,
   ScrollView,
+  Share,
   StyleSheet,
   Switch,
   Text,
@@ -10,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronLeft, Crown, Upload } from 'lucide-react-native';
+import { ChevronLeft, Crown, Upload, Share2 } from 'lucide-react-native';
 import Constants from 'expo-constants';
 import { useNavigation } from '@react-navigation/native';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
@@ -66,6 +67,19 @@ export default function SettingsScreen() {
     if (trimmed !== profile.name) saveProfile({ name: trimmed });
     Keyboard.dismiss();
   }, [name, profile.name, saveProfile]);
+
+  const shareApp = useCallback(async () => {
+    const url = 'https://gmaxmusify.edgeone.dev/';
+    try {
+      await Share.share({
+        message: `GMAX — free music, offline downloads\n${url}`,
+        url,
+        title: 'GMAX Music',
+      });
+    } catch {
+      /* user cancelled */
+    }
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -325,6 +339,24 @@ export default function SettingsScreen() {
           <Row label="Lock screen controls" value="On" />
         </View>
 
+        <Text style={styles.sectionLabel}>SHARE</Text>
+        <View style={styles.card}>
+          <TouchableOpacity
+            style={styles.actionRow}
+            onPress={() => {
+              void shareApp();
+            }}
+            activeOpacity={0.85}
+          >
+            <Share2 color={COLORS.accent.green} size={20} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Share GMAX app</Text>
+              <Text style={styles.rowHint}>WhatsApp, Instagram, Facebook…</Text>
+            </View>
+            <Text style={styles.premiumCta}>Share</Text>
+          </TouchableOpacity>
+        </View>
+
         <Text style={styles.sectionLabel}>ABOUT</Text>
         <View style={styles.card}>
           <Row label="App" value="Gmax" />
@@ -425,7 +457,12 @@ const styles = StyleSheet.create({
   },
   avatarText: { flex: 1 },
   avatarName: { fontFamily: FONTS.medium, fontSize: 18, color: COLORS.text.primary },
-  avatarMeta: { fontFamily: FONTS.regular, fontSize: 13, color: COLORS.text.secondary, marginTop: 2 },
+  avatarMeta: {
+    fontFamily: FONTS.regular,
+    fontSize: 13,
+    color: COLORS.text.secondary,
+    marginTop: 2,
+  },
   fieldLabel: {
     fontFamily: FONTS.regular,
     fontSize: 10,
