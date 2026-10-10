@@ -13,6 +13,9 @@ export interface StreamSource {
 
 const STREAM_TTL = 4 * 60 * 60 * 1000;
 const LOCAL_TTL = 10 * 365 * 24 * 60 * 60 * 1000;
+/** Avoid re-scanning FS on every song switch */
+const diskCache = new Map<string, { uri: string | null; at: number }>();
+const DISK_CACHE_MS = 5 * 60 * 1000;
 
 export class LocalStreamSource implements StreamSource {
   readonly id = 'local';
@@ -156,11 +159,22 @@ class StreamResolverChain {
       return { url: track.localUri, expiresAt: Date.now() + LOCAL_TTL, resolvedBy: 'local' };
     }
     try {
-      const disk = await findOfflineFileOnDisk(track.id);
-      if (disk) {
-        return { url: disk, expiresAt: Date.now() + LOCAL_TTL, resolvedBy: 'local-disk' };
+      const cached = diskCache.get(track.id);
+      const now = Date.now();
+      if (cached && now - cached.at < DISK_CACHE_MS) {
+        if (cached.uri) {
+          return { url: cached.uri, expiresAt: now + LOCAL_TTL, resolvedBy: 'local-disk' };
+        }
+      } else {
+        const disk = await findOfflineFileOnDisk(track.id);
+        diskCache.set(track.id, { uri: disk, at: now });
+        if (disk) {
+          return { url: disk, expiresAt: now + LOCAL_TTL, resolvedBy: 'local-disk' };
+        }
       }
-    } catch { /* network */ }
+    } catch {
+      /* network fallback */
+    }
 
     const cached = this.peek(track);
     if (cached) return cached;
