@@ -265,10 +265,10 @@ export class PlaybackEngine {
         return;
       }
 
-      // ±10s seek + next/previous (when expo-audio supports next/prev buttons)
+      // Track skip only (prev / next) — no ±10s seek buttons
       this.player?.setActiveForLockScreen(true, metadata, {
-        showSeekForward: true,
-        showSeekBackward: true,
+        showSeekForward: false,
+        showSeekBackward: false,
         showNextTrack: true,
         showPreviousTrack: true,
       } as {
