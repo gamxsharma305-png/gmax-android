@@ -1,5 +1,5 @@
 /**
- * Fetches update + ads from gmax-premium-api (no APK rebuild to change content).
+ * Fetches update + ads + guides from gmax-premium-api (no APK rebuild).
  */
 import { PREMIUM_API_BASE } from './PremiumApi';
 
@@ -19,10 +19,8 @@ export type RemoteAdItem = {
   videoUrl?: string;
   posterUrl?: string;
   title?: string;
-  /** Bottom caption under video */
   subtitle?: string;
   description?: string;
-  /** Brand / app name in install bar */
   brandName?: string;
   brandIcon?: string;
   storeLabel?: string;
@@ -40,11 +38,16 @@ export type RemoteAds = {
   items: RemoteAdItem[];
 };
 
+export type RemoteGuides = {
+  howToGenerateKeyYoutubeUrl?: string;
+};
+
 export type RemoteConfig = {
   ok: boolean;
   fetchedAt?: number;
   update: RemoteUpdate;
   ads: RemoteAds;
+  guides?: RemoteGuides;
 };
 
 const EMPTY_UPDATE: RemoteUpdate = {
@@ -79,7 +82,7 @@ export async function fetchRemoteConfig(force = false): Promise<RemoteConfig> {
 
   const base = root();
   if (!base) {
-    return { ok: false, update: EMPTY_UPDATE, ads: EMPTY_ADS };
+    return { ok: false, update: EMPTY_UPDATE, ads: EMPTY_ADS, guides: {} };
   }
 
   try {
@@ -87,7 +90,7 @@ export async function fetchRemoteConfig(force = false): Promise<RemoteConfig> {
       headers: { 'Cache-Control': 'no-cache' },
     });
     if (!res.ok) {
-      return { ok: false, update: EMPTY_UPDATE, ads: EMPTY_ADS };
+      return { ok: false, update: EMPTY_UPDATE, ads: EMPTY_ADS, guides: {} };
     }
     const data = (await res.json()) as RemoteConfig;
     const normalized: RemoteConfig = {
@@ -101,6 +104,12 @@ export async function fetchRemoteConfig(force = false): Promise<RemoteConfig> {
         apkUrl: data.update?.apkUrl || '',
         force: !!data.update?.force,
         notes: data.update?.notes || '',
+      },
+      guides: {
+        howToGenerateKeyYoutubeUrl:
+          typeof (data as any).guides?.howToGenerateKeyYoutubeUrl === 'string'
+            ? (data as any).guides.howToGenerateKeyYoutubeUrl
+            : undefined,
       },
       ads: {
         enabled: !!data.ads?.enabled,
@@ -119,7 +128,7 @@ export async function fetchRemoteConfig(force = false): Promise<RemoteConfig> {
     cacheAt = Date.now();
     return normalized;
   } catch {
-    return { ok: false, update: EMPTY_UPDATE, ads: EMPTY_ADS };
+    return { ok: false, update: EMPTY_UPDATE, ads: EMPTY_ADS, guides: {} };
   }
 }
 
