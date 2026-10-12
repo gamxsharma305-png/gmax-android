@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Dimensions,
   KeyboardAvoidingView,
   Modal,
+  PanResponder,
   Platform,
   StyleSheet,
   Text,
@@ -10,12 +12,14 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Mic, X, Send, Sparkles } from 'lucide-react-native';
+import { Mic, X, Send, Sparkles, GripHorizontal } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import { COLORS, FONTS, SIZES } from '../../constants/theme';
 import { usePlayer } from '../../hooks/usePlayer';
 import { useLibrary } from '../../hooks/useLibrary';
+import { useSubscription } from '../../hooks/useSubscription';
 import { MusicService } from '../../services/MusicService';
 import {
   AssistantResult,
@@ -27,19 +31,124 @@ import {
 } from '../../services/VoiceAssistantService';
 import { getGeminiApiKey } from '../../services/GeminiKeyStore';
 
+const FAB_POS_KEY = '@gmax/voice_fab_pos_v1';
+const FAB_SIZE = 54;
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
+
+function defaultFabPos(insetsBottom: number) {
+  return {
+    x: SCREEN_W - FAB_SIZE - 18,
+    y: SCREEN_H - FAB_SIZE - Math.max(insetsBottom, 28) - 160,
+  };
+}
+
 export function VoiceAssistantFab() {
+  const insets = useSafeAreaInsets();
+  const { isPremium } = useSubscription();
+  const { settings } = useLibrary();
+  const navigation = useNavigation<any>();
+
+  const enabled = !!settings.voiceAssistantEnabled;
+  const autoListen = !!settings.voiceAutoListen;
+
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState(() => defaultFabPos(insets.bottom));
+  const posRef = useRef(pos);
+  posRef.current = pos;
+  const dragStart = useRef({ x: 0, y: 0 });
+
+  useEffect(() => {
+    void AsyncStorage.getItem(FAB_POS_KEY).then((raw) => {
+      if (!raw) return;
+      try {
+        const p = JSON.parse(raw);
+        if (typeof p.x === 'number' && typeof p.y === 'number') {
+          setPos({
+            x: Math.min(SCREEN_W - FAB_SIZE, Math.max(0, p.x)),
+            y: Math.min(SCREEN_H - FAB_SIZE - 40, Math.max(insets.top + 8, p.y)),
+          });
+        }
+      } catch {
+        /* ignore */
+      }
+    });
+  }, [insets.top]);
+
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (!isPremium || !enabled || !autoListen || autoOpened.current) return;
+    const t = setTimeout(() => {
+      autoOpened.current = true;
+      setOpen(true);
+    }, 1800);
+    return () => clearTimeout(t);
+  }, [autoListen, enabled, isPremium]);
+
+  const savePos = useCallback((p: { x: number; y: number }) => {
+    void AsyncStorage.setItem(FAB_POS_KEY, JSON.stringify(p));
+  }, []);
+
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 4 || Math.abs(g.dy) > 4,
+      onPanResponderGrant: () => {
+        dragStart.current = { ...posRef.current };
+      },
+      onPanResponderMove: (_, g) => {
+        const x = Math.min(SCREEN_W - FAB_SIZE, Math.max(0, dragStart.current.x + g.dx));
+        const y = Math.min(SCREEN_H - FAB_SIZE - 24, Math.max(40, dragStart.current.y + g.dy));
+        setPos({ x, y });
+      },
+      onPanResponderRelease: () => {
+        savePos(posRef.current);
+      },
+    })
+  ).current;
+
+  const onFabPress = useCallback(() => {
+    if (!isPremium) {
+      navigation.navigate('Paywall');
+      return;
+    }
+    if (!enabled) {
+      navigation.navigate('Settings');
+      return;
+    }
+    setOpen(true);
+  }, [enabled, isPremium, navigation]);
+
   return (
     <>
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={() => setOpen(true)}
-        activeOpacity={0.85}
-        accessibilityLabel="Voice assistant"
+      <View
+        style={[styles.fabWrap, { left: pos.x, top: pos.y }]}
+        {...pan.panHandlers}
+        pointerEvents="box-none"
       >
-        <Mic color="#000" size={22} />
-      </TouchableOpacity>
-      <VoiceAssistantModal visible={open} onClose={() => setOpen(false)} />
+        <TouchableOpacity
+          style={[
+            styles.fab,
+            !isPremium && styles.fabLocked,
+            enabled && autoListen && styles.fabListening,
+          ]}
+          onPress={onFabPress}
+          activeOpacity={0.85}
+          accessibilityLabel="Voice assistant"
+        >
+          <Mic color={isPremium && enabled ? '#000' : '#666'} size={22} />
+        </TouchableOpacity>
+        <View style={styles.dragHint} pointerEvents="none">
+          <GripHorizontal color="rgba(255,255,255,0.35)" size={14} />
+        </View>
+      </View>
+
+      {isPremium && enabled ? (
+        <VoiceAssistantModal
+          visible={open}
+          onClose={() => setOpen(false)}
+          autoListen={autoListen}
+        />
+      ) : null}
     </>
   );
 }
@@ -47,15 +156,26 @@ export function VoiceAssistantFab() {
 function VoiceAssistantModal({
   visible,
   onClose,
+  autoListen,
 }: {
   visible: boolean;
   onClose: () => void;
+  autoListen: boolean;
 }) {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
   const player = usePlayer();
   const { createPlaylist, toggleLike } = useLibrary();
-  const { currentTrack, status, playTrack, next, previous, togglePlayPause } = player;
+  const {
+    currentTrack,
+    status,
+    playTrack,
+    next,
+    previous,
+    togglePlayPause,
+    seekBy,
+    setVolume,
+  } = player;
   const current = currentTrack;
   const togglePlay = togglePlayPause;
 
@@ -109,6 +229,12 @@ function VoiceAssistantModal({
             case 'previous':
               previous();
               break;
+            case 'seek':
+              if (typeof seekBy === 'function') seekBy(a.seconds);
+              break;
+            case 'volume':
+              if (typeof setVolume === 'function') setVolume(a.level);
+              break;
             case 'like':
               if (current) toggleLike(current);
               break;
@@ -143,7 +269,7 @@ function VoiceAssistantModal({
               break;
           }
         } catch {
-          /* ignore single action */
+          /* ignore */
         }
       }
     },
@@ -154,6 +280,8 @@ function VoiceAssistantModal({
       next,
       playTrack,
       previous,
+      seekBy,
+      setVolume,
       status.isPlaying,
       toggleLike,
       togglePlay,
@@ -190,7 +318,7 @@ function VoiceAssistantModal({
             ...result,
             reply:
               result.reply ||
-              'Bolo: play [song], pause, next, previous, like, ya playlist banao.',
+              'Bolo: play [song], pause, next, previous, like, volume, playlist banao.',
           };
         }
 
@@ -220,6 +348,11 @@ function VoiceAssistantModal({
             <View style={styles.sheetTitleRow}>
               <Sparkles color={COLORS.accent.green} size={18} />
               <Text style={styles.sheetTitle}>GMAX Voice</Text>
+              {autoListen ? (
+                <View style={styles.livePill}>
+                  <Text style={styles.livePillText}>READY</Text>
+                </View>
+              ) : null}
             </View>
             <TouchableOpacity onPress={onClose} hitSlop={12}>
               <X color={COLORS.text.secondary} size={22} />
@@ -229,8 +362,8 @@ function VoiceAssistantModal({
           {hasKey === false ? (
             <View style={styles.warnBox}>
               <Text style={styles.warnText}>
-                Apni Gemini API key Settings → Voice Assistant mein daalo. Key sirf is phone
-                pe rehti hai — server pe nahi.
+                Gemini API key Settings → Voice Assistant mein daalo. Key sirf phone pe rehti
+                hai.
               </Text>
               <TouchableOpacity
                 style={styles.warnBtn}
@@ -242,13 +375,18 @@ function VoiceAssistantModal({
                 <Text style={styles.warnBtnText}>Open Settings</Text>
               </TouchableOpacity>
             </View>
-          ) : null}
+          ) : (
+            <Text style={styles.hintTop}>
+              App open hai — command type karo. Mic button drag karke mini-player se door rakh
+              sakte ho.
+            </Text>
+          )}
 
           <View style={styles.chat}>
             {log.length === 0 ? (
               <Text style={styles.hint}>
-                Examples: "Play Kesariya", "Pause", "Next song", "Arijit ke gaane chalao",
-                "Party playlist banao"
+                Examples: "Play Kesariya", "Pause", "Next", "Volume 50", "Arijit playlist
+                banao", "Library kholo"
               </Text>
             ) : (
               log.map((m, i) => (
@@ -273,11 +411,12 @@ function VoiceAssistantModal({
               style={styles.input}
               value={text}
               onChangeText={setText}
-              placeholder="Bolo ya type karo…"
+              placeholder="Command type karo…"
               placeholderTextColor={COLORS.text.muted}
               editable={!busy}
               onSubmitEditing={() => void handleCommand(text)}
               returnKeyType="send"
+              autoFocus={autoListen}
             />
             <TouchableOpacity
               style={[styles.sendBtn, busy && { opacity: 0.5 }]}
@@ -288,7 +427,7 @@ function VoiceAssistantModal({
             </TouchableOpacity>
           </View>
           <Text style={styles.footerNote}>
-            Gemini key local · pro assistant · app open hone par kaam karta hai
+            Premium · Gemini local key · FAB drag karke move karo
           </Text>
         </View>
       </KeyboardAvoidingView>
@@ -297,23 +436,29 @@ function VoiceAssistantModal({
 }
 
 const styles = StyleSheet.create({
-  fab: {
+  fabWrap: {
     position: 'absolute',
-    right: 18,
-    bottom: 110,
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    width: FAB_SIZE + 8,
+    height: FAB_SIZE + 16,
+    zIndex: 9999,
+    elevation: 24,
+    alignItems: 'center',
+  },
+  fab: {
+    width: FAB_SIZE,
+    height: FAB_SIZE,
+    borderRadius: FAB_SIZE / 2,
     backgroundColor: COLORS.accent.green,
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 50,
-    elevation: 8,
     shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
   },
+  fabLocked: { backgroundColor: '#3a3a3a' },
+  fabListening: { borderWidth: 2, borderColor: '#fff' },
+  dragHint: { marginTop: 2, opacity: 0.8 },
   modalRoot: { flex: 1, justifyContent: 'flex-end' },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
@@ -337,6 +482,18 @@ const styles = StyleSheet.create({
   },
   sheetTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   sheetTitle: { fontFamily: FONTS.bold, fontSize: 17, color: COLORS.text.primary },
+  livePill: {
+    backgroundColor: 'rgba(29,185,84,0.25)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  livePillText: {
+    fontFamily: FONTS.bold,
+    fontSize: 10,
+    color: COLORS.accent.green,
+    letterSpacing: 1,
+  },
   warnBox: {
     backgroundColor: 'rgba(239,68,68,0.12)',
     borderRadius: 12,
@@ -358,6 +515,13 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   warnBtnText: { fontFamily: FONTS.bold, fontSize: 13, color: '#000' },
+  hintTop: {
+    fontFamily: FONTS.regular,
+    fontSize: 12,
+    color: COLORS.text.muted,
+    marginBottom: 8,
+    lineHeight: 17,
+  },
   chat: { minHeight: 120, maxHeight: 280, marginBottom: 10 },
   hint: {
     fontFamily: FONTS.regular,
@@ -373,7 +537,10 @@ const styles = StyleSheet.create({
     maxWidth: '90%',
   },
   userBubble: { alignSelf: 'flex-end', backgroundColor: 'rgba(29,185,84,0.25)' },
-  aiBubble: { alignSelf: 'flex-start', backgroundColor: COLORS.surfaceLight || '#1a1a1a' },
+  aiBubble: {
+    alignSelf: 'flex-start',
+    backgroundColor: COLORS.surfaceLight || '#1a1a1a',
+  },
   bubbleText: { fontFamily: FONTS.regular, fontSize: 14, color: COLORS.text.primary },
   inputRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   input: {
