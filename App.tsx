@@ -7,6 +7,7 @@ import { LibraryProvider } from './src/hooks/useLibrary';
 import { ThemeProvider } from './src/theme/ThemeContext';
 import { PlayerProvider } from './src/hooks/usePlayer';
 import { RootNavigator } from './src/navigation/RootNavigator';
+import { VoiceAssistantFab } from './src/components/voice/VoiceAssistantOverlay';
 import { YouTubeHost } from './src/player/YouTubeHost';
 import { GSplash } from './src/components/GSplash';
 import { UpdateModal } from './src/components/UpdateModal';
@@ -33,7 +34,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // After splash (~3.6s) so intro is not cut by update popup
     const t = setTimeout(() => {
       void (async () => {
         try {
@@ -60,6 +60,7 @@ export default function App() {
               <View style={styles.webWrapper}>
                 <View style={styles.appContainer}>
                   <RootNavigator />
+                  <VoiceAssistantFab />
                   <YouTubeHost />
                   <StatusBar style="light" backgroundColor="#050707" />
                   {showSplash ? (
