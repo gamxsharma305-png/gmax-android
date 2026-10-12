@@ -48,7 +48,8 @@ export function VoiceAssistantFab() {
   const { settings } = useLibrary();
   const navigation = useNavigation<any>();
 
-  const enabled = !!settings.voiceAssistantEnabled;
+  // Premium feature — on by default for premium users
+  const enabled = isPremium && settings.voiceAssistantEnabled !== false;
   const autoListen = !!settings.voiceAutoListen;
 
   const [open, setOpen] = useState(false);
@@ -111,12 +112,8 @@ export function VoiceAssistantFab() {
       navigation.navigate('Paywall');
       return;
     }
-    if (!enabled) {
-      navigation.navigate('Settings');
-      return;
-    }
     setOpen(true);
-  }, [enabled, isPremium, navigation]);
+  }, [isPremium, navigation]);
 
   return (
     <>
@@ -135,14 +132,14 @@ export function VoiceAssistantFab() {
           activeOpacity={0.85}
           accessibilityLabel="Voice assistant"
         >
-          <Mic color={isPremium && enabled ? '#000' : '#666'} size={22} />
+          <Mic color={isPremium ? '#000' : '#666'} size={22} />
         </TouchableOpacity>
         <View style={styles.dragHint} pointerEvents="none">
           <GripHorizontal color="rgba(255,255,255,0.35)" size={14} />
         </View>
       </View>
 
-      {isPremium && enabled ? (
+      {isPremium ? (
         <VoiceAssistantModal
           visible={open}
           onClose={() => setOpen(false)}
@@ -348,11 +345,6 @@ function VoiceAssistantModal({
             <View style={styles.sheetTitleRow}>
               <Sparkles color={COLORS.accent.green} size={18} />
               <Text style={styles.sheetTitle}>GMAX Voice</Text>
-              {autoListen ? (
-                <View style={styles.livePill}>
-                  <Text style={styles.livePillText}>READY</Text>
-                </View>
-              ) : null}
             </View>
             <TouchableOpacity onPress={onClose} hitSlop={12}>
               <X color={COLORS.text.secondary} size={22} />
@@ -377,8 +369,7 @@ function VoiceAssistantModal({
             </View>
           ) : (
             <Text style={styles.hintTop}>
-              App open hai — command type karo. Mic button drag karke mini-player se door rakh
-              sakte ho.
+              Mic button drag karke mini-player se door rakh sakte ho. Command type karo.
             </Text>
           )}
 
@@ -427,7 +418,7 @@ function VoiceAssistantModal({
             </TouchableOpacity>
           </View>
           <Text style={styles.footerNote}>
-            Premium · Gemini local key · FAB drag karke move karo
+            Premium · Gemini local key · FAB drag se move
           </Text>
         </View>
       </KeyboardAvoidingView>
@@ -482,18 +473,6 @@ const styles = StyleSheet.create({
   },
   sheetTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   sheetTitle: { fontFamily: FONTS.bold, fontSize: 17, color: COLORS.text.primary },
-  livePill: {
-    backgroundColor: 'rgba(29,185,84,0.25)',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
-  },
-  livePillText: {
-    fontFamily: FONTS.bold,
-    fontSize: 10,
-    color: COLORS.accent.green,
-    letterSpacing: 1,
-  },
   warnBox: {
     backgroundColor: 'rgba(239,68,68,0.12)',
     borderRadius: 12,
