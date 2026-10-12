@@ -11,6 +11,8 @@ import SettingsScreen from '../screens/Settings';
 import NowPlayingScreen from '../screens/NowPlaying';
 import PaywallScreen from '../screens/Paywall';
 import ImportSpotifyPlaylistScreen from '../screens/ImportSpotifyPlaylist';
+import ImportPlaylistHubScreen from '../screens/ImportPlaylistHub';
+import ImportUrlPlaylistScreen from '../screens/ImportUrlPlaylist';
 import { trackPage } from '../services/AnalyticsService';
 
 const Stack = createNativeStackNavigator();
@@ -55,7 +57,9 @@ export const RootNavigator = () => {
         <Stack.Screen name="Playlist" component={PlaylistDetailScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="Paywall" component={PaywallScreen} />
+        <Stack.Screen name="ImportPlaylist" component={ImportPlaylistHubScreen} />
         <Stack.Screen name="ImportSpotify" component={ImportSpotifyPlaylistScreen} />
+        <Stack.Screen name="ImportUrl" component={ImportUrlPlaylistScreen} />
         <Stack.Screen
           name="NowPlaying"
           component={NowPlayingScreen}
