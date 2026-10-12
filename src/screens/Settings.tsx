@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Keyboard,
   ScrollView,
@@ -23,6 +23,11 @@ import {
 } from '../services/LibraryService';
 import { useLibrary } from '../hooks/useLibrary';
 import { useSubscription } from '../hooks/useSubscription';
+import {
+  getGeminiApiKey,
+  setGeminiApiKey,
+  maskGeminiKey,
+} from '../services/GeminiKeyStore';
 
 const GENDERS: { value: Gender; label: string }[] = [
   { value: 'male', label: 'Male' },
@@ -58,6 +63,34 @@ export default function SettingsScreen() {
   const { isPremium, daysLeft } = useSubscription();
 
   const [name, setName] = useState(profile.name);
+  const [geminiKey, setGeminiKeyState] = useState('');
+  const [geminiSaved, setGeminiSaved] = useState(false);
+  const [geminiMasked, setGeminiMasked] = useState<string | null>(null);
+
+  useEffect(() => {
+    void getGeminiApiKey().then((k) => {
+      if (k) {
+        setGeminiMasked(maskGeminiKey(k));
+        setGeminiSaved(true);
+      }
+    });
+  }, []);
+
+  const saveGemini = useCallback(async () => {
+    await setGeminiApiKey(geminiKey);
+    const k = await getGeminiApiKey();
+    setGeminiSaved(!!k);
+    setGeminiMasked(k ? maskGeminiKey(k) : null);
+    setGeminiKeyState('');
+    Keyboard.dismiss();
+  }, [geminiKey]);
+
+  const clearGemini = useCallback(async () => {
+    await setGeminiApiKey('');
+    setGeminiSaved(false);
+    setGeminiMasked(null);
+    setGeminiKeyState('');
+  }, []);
 
   const version =
     Constants.expoConfig?.version ?? Constants.manifest2?.extra?.expoClient?.version ?? '1.1.0';
@@ -337,6 +370,80 @@ export default function SettingsScreen() {
           <Row label="Offline download" value={isPremium ? 'Premium' : 'Locked'} />
           <Divider />
           <Row label="Lock screen controls" value="On" />
+        </View>
+
+        <Text style={styles.sectionLabel}>VOICE ASSISTANT (GEMINI)</Text>
+        <View style={styles.card}>
+          <Text style={styles.rowHint}>
+            Apni Google Gemini API key yahan paste karo. Key sirf is phone pe store hoti hai —
+            kisi server pe nahi jaati. Mic button se commands do: play, pause, playlist, etc.
+          </Text>
+          {geminiSaved && geminiMasked ? (
+            <Text style={[styles.rowLabel, { marginTop: 10 }]}>Saved: {geminiMasked}</Text>
+          ) : (
+            <Text style={[styles.rowHint, { marginTop: 8 }]}>No key saved yet</Text>
+          )}
+          <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>GEMINI API KEY</Text>
+          <TextInput
+            style={styles.input}
+            value={geminiKey}
+            onChangeText={setGeminiKeyState}
+            placeholder="AIza…"
+            placeholderTextColor={COLORS.text.muted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            secureTextEntry
+          />
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+            <TouchableOpacity
+              style={[
+                styles.actionRow,
+                {
+                  flex: 1,
+                  justifyContent: 'center',
+                  backgroundColor: COLORS.accent.green,
+                  borderRadius: 10,
+                  paddingVertical: 12,
+                },
+              ]}
+              onPress={() => void saveGemini()}
+              activeOpacity={0.85}
+            >
+              <Text style={{ fontFamily: FONTS.bold, color: '#000', textAlign: 'center' }}>
+                Save key
+              </Text>
+            </TouchableOpacity>
+            {geminiSaved ? (
+              <TouchableOpacity
+                style={[
+                  styles.actionRow,
+                  {
+                    flex: 1,
+                    justifyContent: 'center',
+                    borderRadius: 10,
+                    paddingVertical: 12,
+                    borderWidth: 1,
+                    borderColor: COLORS.glassBorder,
+                  },
+                ]}
+                onPress={() => void clearGemini()}
+                activeOpacity={0.85}
+              >
+                <Text
+                  style={{
+                    fontFamily: FONTS.medium,
+                    color: COLORS.text.secondary,
+                    textAlign: 'center',
+                  }}
+                >
+                  Clear
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+          <Text style={[styles.rowHint, { marginTop: 10 }]}>
+            Free key: aistudio.google.com → Get API key
+          </Text>
         </View>
 
         <Text style={styles.sectionLabel}>SHARE</Text>
