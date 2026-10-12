@@ -174,13 +174,13 @@ export default function SettingsScreen() {
         <View style={styles.card}>
           <TouchableOpacity
             style={styles.actionRow}
-            onPress={() => navigation.navigate('ImportSpotify' as never)}
+            onPress={() => navigation.navigate('ImportPlaylist' as never)}
             activeOpacity={0.85}
           >
             <Upload color={COLORS.accent.green} size={20} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.rowLabel}>Import playlist from Spotify</Text>
-              <Text style={styles.rowHint}>CSV via Chosic → YouTube → My Playlist</Text>
+              <Text style={styles.rowLabel}>Import playlist</Text>
+              <Text style={styles.rowHint}>YouTube · Spotify · Deezer</Text>
             </View>
             <Text style={styles.premiumCta}>Open</Text>
           </TouchableOpacity>
