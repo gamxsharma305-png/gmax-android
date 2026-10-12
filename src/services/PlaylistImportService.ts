@@ -1,6 +1,5 @@
 /**
- * Fetch remote playlists (YouTube / Deezer) and map to local Tracks.
- * Spotify stays CSV-based in ImportSpotifyPlaylist screen.
+ * Fetch remote playlists (YouTube / Deezer / Spotify) and map to local Tracks.
  */
 import { Track } from '../core/types';
 import { MusicService } from './MusicService';
@@ -45,6 +44,22 @@ export function extractDeezerPlaylistId(input: string): string | null {
   if (m?.[1]) return m[1];
   const idOnly = s.match(/playlist\/(\d+)/i);
   return idOnly?.[1] ?? null;
+}
+
+export function extractSpotifyPlaylistId(input: string): string | null {
+  const s = input.trim();
+  if (!s) return null;
+  if (/^[0-9A-Za-z]{22}$/.test(s)) return s;
+  try {
+    const u = new URL(s);
+    const parts = u.pathname.split('/').filter(Boolean);
+    const idx = parts.indexOf('playlist');
+    if (idx >= 0 && parts[idx + 1]) return parts[idx + 1].split('?')[0];
+  } catch {
+    /* ignore */
+  }
+  const m = s.match(/playlist[/:]([0-9A-Za-z]{22})/i);
+  return m?.[1] ?? null;
 }
 
 function ytThumb(videoId: string, thumbs?: { url: string; width: number }[]): string {
@@ -105,7 +120,7 @@ export async function fetchYouTubePlaylist(playlistId: string): Promise<Imported
   throw new Error(lastErr);
 }
 
-type DeezerTrackRow = {
+type TrackRow = {
   title: string;
   artist: string;
   album?: string;
@@ -117,14 +132,14 @@ export async function fetchDeezerPlaylistMeta(playlistId: string): Promise<{
   name: string;
   description: string;
   cover: string;
-  rows: DeezerTrackRow[];
+  rows: TrackRow[];
 }> {
   const res = await fetch(`https://api.deezer.com/playlist/${encodeURIComponent(playlistId)}`);
   if (!res.ok) throw new Error(`Deezer HTTP ${res.status}`);
   const body = await res.json();
   if (body?.error) throw new Error(String(body.error.message || 'Deezer error'));
 
-  const rows: DeezerTrackRow[] = [];
+  const rows: TrackRow[] = [];
   let next: string | null = null;
   const firstTracks = body?.tracks?.data;
   if (Array.isArray(firstTracks)) {
@@ -168,8 +183,44 @@ export async function fetchDeezerPlaylistMeta(playlistId: string): Promise<{
   };
 }
 
+export async function fetchSpotifyPlaylistViaApi(input: string): Promise<{
+  name: string;
+  description: string;
+  cover: string;
+  rows: TrackRow[];
+}> {
+  const { PREMIUM_API_BASE } = await import('./PremiumApi');
+  const base = (PREMIUM_API_BASE || '').replace(/\/$/, '');
+  if (!base) throw new Error('Premium API URL missing');
+
+  const id = extractSpotifyPlaylistId(input);
+  const qs = id
+    ? `id=${encodeURIComponent(id)}`
+    : `url=${encodeURIComponent(input.trim())}`;
+  const res = await fetch(`${base}/api/spotify-playlist?${qs}`);
+  const body = await res.json().catch(() => ({} as any));
+  if (!res.ok || !body?.ok) {
+    throw new Error(body?.error || `Spotify API ${res.status}`);
+  }
+  const rows = Array.isArray(body.tracks)
+    ? body.tracks.map((t: any) => ({
+        title: String(t.title || ''),
+        artist: String(t.artist || ''),
+        album: String(t.album || ''),
+        cover: String(t.cover || ''),
+        duration: Number(t.duration || 0),
+      }))
+    : [];
+  return {
+    name: String(body.name || 'Spotify Playlist'),
+    description: String(body.description || ''),
+    cover: String(body.cover || ''),
+    rows: rows.filter((r: TrackRow) => r.title),
+  };
+}
+
 export async function resolveRowsToTracks(
-  rows: DeezerTrackRow[],
+  rows: TrackRow[],
   onProgress?: (done: number, total: number) => void
 ): Promise<Track[]> {
   const out: Track[] = [];
