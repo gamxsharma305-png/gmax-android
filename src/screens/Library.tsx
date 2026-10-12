@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Plus, Heart, ListMusic, X, Lock } from 'lucide-react-native';
+import { Plus, Heart, ListMusic, X, Lock, Download } from 'lucide-react-native';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { MiniPlayer } from '../components/player/MiniPlayer';
 import { StatusBarScrim } from '../components/common/StatusBarScrim';
@@ -33,7 +33,6 @@ export default function LibraryScreen() {
   const [loadingGenre, setLoadingGenre] = useState<string | null>(null);
   const [autoError, setAutoError] = useState<string | null>(null);
 
-  // User playlists excluding system "Downloads"
   const userPlaylists = useMemo(
     () => playlists.filter((p) => p.name !== 'Downloads'),
     [playlists]
@@ -169,13 +168,21 @@ export default function LibraryScreen() {
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + SIZES.lg }]}>
         <Text style={styles.title}>Your Library</Text>
-        <TouchableOpacity onPress={onPressCreate} hitSlop={12}>
-          {creating ? (
-            <X color={COLORS.text.primary} size={24} />
-          ) : (
-            <Plus color={COLORS.text.primary} size={24} />
-          )}
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('ImportPlaylist' as never)}
+            hitSlop={12}
+          >
+            <Download color={COLORS.text.primary} size={22} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={onPressCreate} hitSlop={12}>
+            {creating ? (
+              <X color={COLORS.text.primary} size={24} />
+            ) : (
+              <Plus color={COLORS.text.primary} size={24} />
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
       {creating && (
@@ -317,7 +324,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   mixLocked: { opacity: 0.55 },
-  mixTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 },
+  mixTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
+  },
   mixName: { fontFamily: FONTS.medium, fontSize: 14, color: COLORS.text.primary, flex: 1 },
   mixDesc: { fontFamily: FONTS.regular, fontSize: 11, color: COLORS.text.secondary, marginTop: 2 },
   createRow: {
