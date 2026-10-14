@@ -1,8 +1,7 @@
 /**
  * Library — playlists, offline registry, settings, history.
- * Restored full module after accidental placeholder push.
  */
-import { Playlist, Track, AppSettings, RepeatMode } from '../core/types';
+import { Playlist, Track } from '../core/types';
 import { readJson, writeJsonDebounced, STORAGE_KEYS } from '../core/storage';
 import {
   downloadTrackAudio,
@@ -11,7 +10,25 @@ import {
   findOfflineFileOnDisk,
 } from './OfflineService';
 
-const OFFLINE_PLAYLIST_NAME = 'Downloaded';
+export type AppSettings = {
+  volume: number;
+  autoplayRelated: boolean;
+  resolverEndpoints: { url: string; kind: string }[];
+  profile?: { name: string; gender: string; completed: boolean };
+  preferAudioOnly?: boolean;
+  themeMode?: string;
+  accentColor?: string;
+  language?: string;
+  audioQuality?: string;
+  showQualityBadge?: boolean;
+  gapless?: boolean;
+  crossfade?: boolean;
+  glassTabBar?: boolean;
+  voiceAssistantEnabled?: boolean;
+  voiceAutoListen?: boolean;
+};
+
+const OFFLINE_PLAYLIST_NAME = 'Downloads';
 
 const DEFAULT_SETTINGS: AppSettings = {
   volume: 1,
@@ -28,6 +45,19 @@ function uid(): string {
   return `pl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function emptyPlaylist(name: string, tracks: Track[] = []): Playlist {
+  return {
+    id: uid(),
+    name,
+    description: '',
+    creator: '',
+    coverImageUrl: '',
+    tracks,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
 class LibraryServiceImpl {
   private playlists: Playlist[] = [];
   private recents: Track[] = [];
@@ -40,19 +70,14 @@ class LibraryServiceImpl {
     try {
       const [pls, rec, set] = await Promise.all([
         readJson<Playlist[]>(STORAGE_KEYS.playlists, []),
-        readJson<Track[]>(STORAGE_KEYS.recents, []),
-        readJson<AppSettings>(STORAGE_KEYS.settings, DEFAULT_SETTINGS),
+        readJson<Track[]>(STORAGE_KEYS.recentlyPlayed, []),
+        readJson<Partial<AppSettings>>(STORAGE_KEYS.settings, {}),
       ]);
       this.playlists = Array.isArray(pls) ? pls : [];
       this.recents = Array.isArray(rec) ? rec : [];
       this.settings = { ...DEFAULT_SETTINGS, ...(set || {}) };
       if (!this.playlists.find((p) => p.name === OFFLINE_PLAYLIST_NAME)) {
-        this.playlists.unshift({
-          id: uid(),
-          name: OFFLINE_PLAYLIST_NAME,
-          tracks: [],
-          createdAt: Date.now(),
-        });
+        this.playlists.unshift(emptyPlaylist(OFFLINE_PLAYLIST_NAME));
         this.persistPlaylists();
       }
     } catch {
@@ -68,11 +93,7 @@ class LibraryServiceImpl {
 
   private notifyChanged(): void {
     for (const cb of this.listeners) {
-      try {
-        cb();
-      } catch {
-        /* ok */
-      }
+      try { cb(); } catch { /* ok */ }
     }
   }
 
@@ -85,12 +106,7 @@ class LibraryServiceImpl {
   }
 
   createPlaylist(name: string): Playlist {
-    const pl: Playlist = {
-      id: uid(),
-      name: name.trim() || 'Playlist',
-      tracks: [],
-      createdAt: Date.now(),
-    };
+    const pl = emptyPlaylist(name.trim() || 'Playlist');
     this.playlists.push(pl);
     this.persistPlaylists();
     this.notifyChanged();
@@ -101,6 +117,7 @@ class LibraryServiceImpl {
     const pl = this.playlists.find((p) => p.id === id);
     if (!pl || pl.name === OFFLINE_PLAYLIST_NAME) return;
     pl.name = name.trim() || pl.name;
+    pl.updatedAt = Date.now();
     this.persistPlaylists();
     this.notifyChanged();
   }
@@ -122,6 +139,7 @@ class LibraryServiceImpl {
         pl.tracks.push(stripStream(t));
       }
     }
+    pl.updatedAt = Date.now();
     this.persistPlaylists();
     this.notifyChanged();
   }
@@ -130,6 +148,7 @@ class LibraryServiceImpl {
     const pl = this.playlists.find((p) => p.id === playlistId);
     if (!pl) return;
     pl.tracks = pl.tracks.filter((t) => t.id !== trackId);
+    pl.updatedAt = Date.now();
     this.persistPlaylists();
     this.notifyChanged();
   }
@@ -139,17 +158,13 @@ class LibraryServiceImpl {
     const offlineTrack: Track = { ...stripStream(track), localUri };
     let pl = this.playlists.find((p) => p.name === OFFLINE_PLAYLIST_NAME);
     if (!pl) {
-      pl = {
-        id: uid(),
-        name: OFFLINE_PLAYLIST_NAME,
-        tracks: [],
-        createdAt: Date.now(),
-      };
+      pl = emptyPlaylist(OFFLINE_PLAYLIST_NAME);
       this.playlists.unshift(pl);
     }
     const idx = pl.tracks.findIndex((t) => t.id === track.id);
     if (idx < 0) pl.tracks.push(offlineTrack);
     else pl.tracks[idx] = { ...pl.tracks[idx], localUri };
+    pl.updatedAt = Date.now();
     this.persistPlaylists();
     this.notifyChanged();
   }
@@ -162,23 +177,16 @@ class LibraryServiceImpl {
     const offlineTrack: Track = { ...stripStream(track), localUri };
     let pl = this.playlists.find((p) => p.name === OFFLINE_PLAYLIST_NAME);
     if (!pl) {
-      pl = {
-        id: uid(),
-        name: OFFLINE_PLAYLIST_NAME,
-        tracks: [offlineTrack],
-        createdAt: Date.now(),
-      };
+      pl = emptyPlaylist(OFFLINE_PLAYLIST_NAME, [offlineTrack]);
       this.playlists.unshift(pl);
       this.persistPlaylists();
       this.notifyChanged();
       return { playlistId: pl.id, alreadyHad: false, localUri };
     }
     const idx = pl.tracks.findIndex((t) => t.id === track.id);
-    if (idx < 0) {
-      pl.tracks.push(offlineTrack);
-    } else {
-      pl.tracks[idx] = { ...pl.tracks[idx], localUri };
-    }
+    if (idx < 0) pl.tracks.push(offlineTrack);
+    else pl.tracks[idx] = { ...pl.tracks[idx], localUri };
+    pl.updatedAt = Date.now();
     this.persistPlaylists();
     this.notifyChanged();
     return { playlistId: pl.id, alreadyHad: fileHad && idx >= 0, localUri };
@@ -233,14 +241,12 @@ class LibraryServiceImpl {
     return [...this.recents];
   }
 
-  recordPlay(track: Track): void {
-    /* analytics hook — optional */
-  }
+  recordPlay(_track: Track): void {}
 
   recordListen(track: Track): void {
     const clean = stripStream(track);
     this.recents = [clean, ...this.recents.filter((t) => t.id !== track.id)].slice(0, 50);
-    writeJsonDebounced(STORAGE_KEYS.recents, this.recents, 400);
+    writeJsonDebounced(STORAGE_KEYS.recentlyPlayed, this.recents, 400);
     this.notifyChanged();
   }
 
@@ -257,7 +263,7 @@ class LibraryServiceImpl {
   async getSavedPlayback(): Promise<{ trackId: string | null; position: number }> {
     try {
       const s = await readJson<{ trackId?: string; position?: number }>(
-        STORAGE_KEYS.playback,
+        STORAGE_KEYS.playbackState,
         {}
       );
       return { trackId: s.trackId ?? null, position: Number(s.position) || 0 };
@@ -267,7 +273,7 @@ class LibraryServiceImpl {
   }
 
   savePlayback(trackId: string, position: number): void {
-    writeJsonDebounced(STORAGE_KEYS.playback, { trackId, position }, 800);
+    writeJsonDebounced(STORAGE_KEYS.playbackState, { trackId, position }, 800);
   }
 }
 
