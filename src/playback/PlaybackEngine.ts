@@ -1,1 +1,437 @@
-PLACEHOLDER_PE
+import { Platform } from 'react-native';
+import {
+  AudioPlayer,
+  createAudioPlayer,
+  setAudioModeAsync,
+  setIsAudioActiveAsync,
+} from 'expo-audio';
+import { appError, toAppError } from '../core/errors';
+import { ResolvedStream, Track } from '../core/types';
+
+export type PlaybackStatus = {
+  isPlaying: boolean;
+  isBuffering: boolean;
+  isLoaded: boolean;
+  position: number;
+  duration: number;
+  volume: number;
+};
+
+export const IDLE_STATUS: PlaybackStatus = {
+  isPlaying: false,
+  isBuffering: false,
+  isLoaded: false,
+  position: 0,
+  duration: 0,
+  volume: 1,
+};
+
+type EngineEvents = {
+  onStatus: (status: PlaybackStatus) => void;
+  onComplete: () => void;
+  onError: (error: unknown) => void;
+  onRemoteNext: () => void;
+  onRemotePrevious: () => void;
+};
+
+export class PlaybackEngine {
+  private player: AudioPlayer | null = null;
+  private subscription: { remove: () => void } | null = null;
+  private listeners: Partial<EngineEvents> = {};
+
+  private status: PlaybackStatus = { ...IDLE_STATUS };
+  private currentTrackId: string | null = null;
+  private desiredVolume = 1;
+
+  private loadTimer: ReturnType<typeof setTimeout> | null = null;
+  private loadToken = 0;
+  private completionFired = false;
+  private stallTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastPos = 0;
+  private lastPosAt = 0;
+  private playingLocal = false;
+
+  private configured = false;
+  private lockScreenActive = false;
+  private lockScreenTrack: Track | null = null;
+  private lockScreenSynced = false;
+  private remoteSubs: { remove: () => void }[] = [];
+
+  on<K extends keyof EngineEvents>(event: K, handler: EngineEvents[K]): void {
+    this.listeners[event] = handler;
+  }
+
+  getStatus(): PlaybackStatus {
+    return this.status;
+  }
+
+  async configure(): Promise<void> {
+    if (this.configured) return;
+    this.configured = true;
+
+    try {
+      await setAudioModeAsync({
+        playsInSilentMode: true,
+        shouldPlayInBackground: true,
+        interruptionMode: 'doNotMix',
+      });
+      await setIsAudioActiveAsync(true);
+    } catch {
+      // best effort
+    }
+  }
+
+  private ensurePlayer(): AudioPlayer {
+    if (this.player) return this.player;
+
+    const player = createAudioPlayer(null, { updateInterval: 250 });
+    player.volume = this.desiredVolume;
+
+    this.subscription = player.addListener('playbackStatusUpdate', (s) => {
+      this.handleStatus(s);
+    });
+
+    this.player = player;
+    return player;
+  }
+
+  private handleStatus(s: any): void {
+    const duration = Number.isFinite(s?.duration) && s.duration > 0 ? s.duration : 0;
+    const position = Number.isFinite(s?.currentTime) ? Math.max(0, s.currentTime) : 0;
+
+    if (s?.isLoaded && this.loadTimer) {
+      clearTimeout(this.loadTimer);
+      this.loadTimer = null;
+    }
+
+    if (s?.error) {
+      this.clearLoadTimer();
+      this.clearStallTimer();
+      const msg = String(s.error);
+      this.listeners.onError?.(appError('playback_failed', msg));
+      return;
+    }
+
+    this.status = {
+      isPlaying: Boolean(s?.playing),
+      isBuffering: Boolean(s?.isBuffering),
+      isLoaded: Boolean(s?.isLoaded),
+      position,
+      duration,
+      volume: Number.isFinite(s?.volume) ? s.volume : this.desiredVolume,
+    };
+
+    this.listeners.onStatus?.(this.status);
+
+    if (s?.isLoaded && s?.playing) this.syncLockScreenOnce();
+
+    if (s?.isLoaded && (s?.playing || s?.isBuffering) && !this.completionFired) {
+      const now = Date.now();
+      if (Math.abs(position - this.lastPos) > 0.35) {
+        this.lastPos = position;
+        this.lastPosAt = now;
+        this.clearStallTimer();
+      } else if (this.lastPosAt > 0 && now - this.lastPosAt > 4500) {
+        if (position >= 3 || this.playingLocal) {
+          this.completionFired = true;
+          this.clearStallTimer();
+          try {
+            this.player?.pause();
+          } catch {
+            /* ok */
+          }
+          this.listeners.onComplete?.();
+          return;
+        }
+      } else if (this.lastPosAt === 0) {
+        this.lastPos = position;
+        this.lastPosAt = now;
+      }
+    }
+
+    if (s?.didJustFinish && !this.completionFired) {
+      this.completionFired = true;
+      this.clearStallTimer();
+      this.listeners.onComplete?.();
+    }
+  }
+
+  private clearStallTimer(): void {
+    if (this.stallTimer) {
+      clearTimeout(this.stallTimer);
+      this.stallTimer = null;
+    }
+  }
+
+  private clearLoadTimer(): void {
+    if (this.loadTimer) {
+      clearTimeout(this.loadTimer);
+      this.loadTimer = null;
+    }
+  }
+
+  async load(
+    track: Track,
+    stream: ResolvedStream,
+    options: { autoPlay?: boolean; startPosition?: number } = {}
+  ): Promise<void> {
+    const { autoPlay = true, startPosition = 0 } = options;
+    const token = ++this.loadToken;
+
+    try {
+      const player = this.ensurePlayer();
+      await this.configure();
+
+      this.currentTrackId = track.id;
+      this.completionFired = false;
+      this.clearStallTimer();
+      this.lastPos = 0;
+      this.lastPosAt = 0;
+      this.playingLocal =
+        stream.url.startsWith('file://') ||
+        stream.resolvedBy === 'local' ||
+        stream.url.startsWith('/');
+
+      this.status = { ...IDLE_STATUS, isBuffering: true, volume: this.desiredVolume };
+      this.listeners.onStatus?.(this.status);
+
+      const isLocal =
+        stream.url.startsWith('file://') ||
+        stream.resolvedBy === 'local' ||
+        stream.url.startsWith('/');
+      if (isLocal) {
+        player.replace({ uri: stream.url });
+      } else {
+        player.replace({
+          uri: stream.url,
+          ...(stream.headers ? { headers: stream.headers } : {}),
+        });
+      }
+      player.volume = this.desiredVolume;
+
+      this.clearLoadTimer();
+      this.loadTimer = setTimeout(() => {
+        if (token !== this.loadToken) return;
+        if (this.status.isLoaded) return;
+        this.listeners.onError?.(appError('playback_failed', 'Stream did not start'));
+      }, 20_000);
+
+      if (startPosition > 0) {
+        try {
+          await player.seekTo(startPosition);
+        } catch {
+          // non-fatal
+        }
+      }
+
+      if (autoPlay) player.play();
+
+      this.setLockScreenMetadata(track);
+    } catch (e) {
+      this.clearLoadTimer();
+      throw toAppError(e, 'playback_failed');
+    }
+  }
+
+  play(): void {
+    try {
+      this.player?.play();
+    } catch (e) {
+      this.listeners.onError?.(toAppError(e, 'playback_failed'));
+    }
+  }
+
+  pause(): void {
+    try {
+      this.player?.pause();
+    } catch {
+      /* ok */
+    }
+  }
+
+  async seekTo(seconds: number): Promise<void> {
+    if (!this.player) return;
+    if (!Number.isFinite(seconds)) return;
+
+    const duration = this.status.duration;
+    const target = Math.max(0, duration > 0 ? Math.min(seconds, duration) : seconds);
+
+    try {
+      this.completionFired = false;
+      await this.player.seekTo(target);
+      this.status = { ...this.status, position: target };
+      this.listeners.onStatus?.(this.status);
+    } catch (e) {
+      this.listeners.onError?.(toAppError(e, 'playback_failed'));
+    }
+  }
+
+  setVolume(volume: number): void {
+    this.desiredVolume = Math.max(0, Math.min(1, volume));
+    if (this.player) this.player.volume = this.desiredVolume;
+    this.status = { ...this.status, volume: this.desiredVolume };
+    this.listeners.onStatus?.(this.status);
+  }
+
+  getVolume(): number {
+    return this.desiredVolume;
+  }
+
+  stop(): void {
+    this.clearLoadTimer();
+    this.loadToken++;
+    this.currentTrackId = null;
+    this.completionFired = false;
+
+    try {
+      this.player?.pause();
+      this.player?.replace(null);
+    } catch {
+      /* ok */
+    }
+
+    this.clearLockScreen();
+
+    this.status = { ...IDLE_STATUS, volume: this.desiredVolume };
+    this.listeners.onStatus?.(this.status);
+  }
+
+  private setLockScreenMetadata(track: Track): void {
+    if (Platform.OS === 'web') return;
+
+    this.lockScreenTrack = track;
+    this.lockScreenSynced = false;
+
+    const metadata = this.metadataFor(track);
+
+    try {
+      if (this.lockScreenActive) {
+        this.player?.updateLockScreenMetadata(metadata);
+        return;
+      }
+
+      this.player?.setActiveForLockScreen(true, metadata, {
+        showSeekForward: false,
+        showSeekBackward: false,
+        showNextTrack: true,
+        showPreviousTrack: true,
+      } as {
+        showSeekForward: boolean;
+        showSeekBackward: boolean;
+        showNextTrack?: boolean;
+        showPreviousTrack?: boolean;
+      });
+      this.lockScreenActive = true;
+      this.attachRemoteCommandListeners();
+    } catch {
+      // optional
+    }
+  }
+
+  private metadataFor(track: Track) {
+    return {
+      title: track.title,
+      artist: track.artist.name,
+      albumTitle: track.album,
+      artworkUrl: track.albumImageUrl || undefined,
+    };
+  }
+
+  private syncLockScreenOnce(): void {
+    if (Platform.OS === 'web') return;
+    if (this.lockScreenSynced || !this.lockScreenActive) return;
+
+    const track = this.lockScreenTrack;
+    if (!track) return;
+
+    this.lockScreenSynced = true;
+    try {
+      this.player?.updateLockScreenMetadata(this.metadataFor(track));
+    } catch {
+      /* best effort */
+    }
+  }
+
+  private attachRemoteCommandListeners(): void {
+    const player = this.player as (AudioPlayer & {
+      addListener?: (event: string, cb: () => void) => { remove: () => void };
+    }) | null;
+    if (!player?.addListener) return;
+
+    this.detachRemoteCommandListeners();
+
+    const nextEvents = ['remoteNext', 'onRemoteNextTrack', 'mediaNext', 'skipToNext'];
+    const prevEvents = ['remotePrevious', 'onRemotePreviousTrack', 'mediaPrevious', 'skipToPrevious'];
+
+    for (const ev of nextEvents) {
+      try {
+        const sub = player.addListener(ev, () => this.listeners.onRemoteNext?.());
+        if (sub?.remove) this.remoteSubs.push(sub);
+      } catch {
+        /* unsupported */
+      }
+    }
+    for (const ev of prevEvents) {
+      try {
+        const sub = player.addListener(ev, () => this.listeners.onRemotePrevious?.());
+        if (sub?.remove) this.remoteSubs.push(sub);
+      } catch {
+        /* unsupported */
+      }
+    }
+  }
+
+  private detachRemoteCommandListeners(): void {
+    for (const s of this.remoteSubs) {
+      try {
+        s.remove();
+      } catch {
+        /* ok */
+      }
+    }
+    this.remoteSubs = [];
+  }
+
+  private clearLockScreen(): void {
+    if (Platform.OS === 'web' || !this.lockScreenActive) return;
+
+    this.detachRemoteCommandListeners();
+    try {
+      this.player?.clearLockScreenControls();
+    } catch {
+      /* best effort */
+    }
+    this.lockScreenActive = false;
+    this.lockScreenTrack = null;
+    this.lockScreenSynced = false;
+  }
+
+  get trackId(): string | null {
+    return this.currentTrackId;
+  }
+
+  async release(): Promise<void> {
+    this.clearLoadTimer();
+    this.clearStallTimer();
+    this.clearLockScreen();
+
+    this.configured = false;
+    this.subscription?.remove();
+    this.subscription = null;
+
+    try {
+      this.player?.remove();
+    } catch {
+      /* best effort */
+    }
+    this.player = null;
+
+    try {
+      await setIsAudioActiveAsync(false);
+    } catch {
+      /* best effort */
+    }
+  }
+}
+
+export const playbackEngine = new PlaybackEngine();
