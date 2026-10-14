@@ -80,13 +80,6 @@ function minBytesFor(track: Track, bitrateKbps = 96): number {
   return 900_000;
 }
 
-export async function isOfflineComplete(uri: string, track?: Track): Promise<boolean> {
-  const size = await fileSize(uri);
-  if (size <= 0) return false;
-  const min = track ? minBytesFor(track) : 150_000;
-  return size >= min;
-}
-
 function offlineDir(): string {
   const base = FileSystem?.documentDirectory;
   if (!base) throw new Error('File system unavailable');
@@ -171,23 +164,27 @@ export async function downloadTrackAudio(
   if (track.localUri) {
     const size = await fileSize(track.localUri);
     if (size >= minBytes) {
-      onProgress?.({ written: size, total: size, ratio: 1 });
-      return { localUri: track.localUri, alreadyHad: true, bytes: size };
+      return { localUri: toFileUri(track.localUri), alreadyHad: true, bytes: size };
     }
   }
 
-  const videoId = await MusicService.resolveYouTubeId(track).catch(() => null);
-  if (!videoId) {
-    throw new Error('No YouTube id for offline download');
-  }
+  if (signal?.aborted) throw new Error('Download cancelled');
 
-  let lastErr: unknown;
+  const ytTrack = await MusicService.resolveYouTubeTrackForOffline(track, signal);
+  const videoId = ytTrack.sourceId;
+  if (!videoId) throw new Error('No YouTube video id for this track');
 
-  if (isNoteNativeAvailable()) {
+  if (Platform.OS === 'android' && isNoteNativeAvailable()) {
     for (let attempt = 0; attempt < 3; attempt++) {
       if (signal?.aborted) throw new Error('Download cancelled');
       try {
-        await deleteQuiet(path);
+        if (attempt === 0) {
+          const existing = await fileSize(path);
+          if (existing > 0 && existing < Math.min(minBytes, 80_000)) {
+            await deleteQuiet(path);
+          }
+        }
+
         const abs = toAbsolutePath(path);
         const result = await nativeDownloadYouTubeAudio(videoId, abs);
 
@@ -200,9 +197,12 @@ export async function downloadTrackAudio(
             try {
               if (FileSystem.moveAsync) {
                 await FileSystem.moveAsync({ from: path, to: renamed });
-                finalPath = renamed;
+                const movedSize = await fileSize(renamed);
+                if (movedSize > 0) finalPath = renamed;
               }
-            } catch {}
+            } catch {
+              /* keep path */
+            }
           }
 
           const size = (await fileSize(finalPath)) || Number(result.bytes) || 0;
@@ -215,48 +215,60 @@ export async function downloadTrackAudio(
               bytes: size,
             };
           }
-          await deleteQuiet(finalPath);
-          lastErr = new Error(`Incomplete native download (${Math.round(size / 1000)}KB)`);
-        } else {
-          lastErr = new Error(String((result as any).message || 'native download failed'));
+          if (size < 80_000) {
+            await deleteQuiet(finalPath);
+          }
+          if (__DEV__) {
+            console.warn('[Offline] native incomplete', size, 'need', minBytes);
+          }
+        } else if (__DEV__) {
+          console.warn('[Offline] native fail', result.reason, result.message);
         }
       } catch (e) {
-        lastErr = e;
+        if (__DEV__) console.warn('[Offline] native error', attempt, e);
       }
       await new Promise((r) => setTimeout(r, 700 + attempt * 500));
     }
   }
 
-  // JS fallback
+  if (signal?.aborted) throw new Error('Download cancelled');
+
+  let lastErr: Error | null = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     if (signal?.aborted) throw new Error('Download cancelled');
     try {
-      const stream = await MusicService.resolveStream(
-        { ...track, youtubeId: videoId } as Track,
-        signal
-      );
-      if (!stream?.url) throw new Error('No stream URL');
-      const headers = {
-        'User-Agent': YT_UA,
+      const stream = await MusicService.resolveStreamForOffline(ytTrack, signal);
+      const doc = FileSystem.documentDirectory ?? '';
+      if (
+        stream.url.startsWith('file://') ||
+        (doc && stream.url.startsWith(doc))
+      ) {
+        return { localUri: toFileUri(stream.url), alreadyHad: true };
+      }
+
+      const headers: Record<string, string> = {
+        'User-Agent': stream.headers?.['User-Agent'] || YT_UA,
+        Accept: '*/*',
+        'Accept-Encoding': 'identity',
+        Connection: 'keep-alive',
+        Referer: 'https://www.youtube.com/',
         ...(stream.headers || {}),
       };
+
       await deleteQuiet(path);
       await downloadUrlToPath(stream.url, path, headers, minBytes, onProgress);
+
       const size = await fileSize(path);
-      if (size >= minBytes) {
-        return {
-          localUri: toFileUri(path),
-          alreadyHad: false,
-          youtubeId: videoId,
-          bytes: size,
-        };
-      }
-      await deleteQuiet(path);
-      lastErr = new Error(`Incomplete JS download (${Math.round(size / 1000)}KB)`);
+      return {
+        localUri: toFileUri(path),
+        alreadyHad: false,
+        youtubeId: videoId,
+        bytes: size,
+      };
     } catch (e) {
-      lastErr = e;
+      lastErr = e instanceof Error ? e : new Error(String(e));
+      await new Promise((r) => setTimeout(r, 500 + attempt * 400));
     }
-    await new Promise((r) => setTimeout(r, 700 + attempt * 500));
   }
 
   throw lastErr ?? new Error('YouTube download failed');
