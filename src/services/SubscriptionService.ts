@@ -181,6 +181,19 @@ class SubscriptionServiceImpl {
     return this.getState();
   }
 
+  /** Local grant from rewarded ads (5 ads = 1 day). Stacks on existing expiry. */
+  async grantDaysFromAds(days: number): Promise<SubscriptionState> {
+    const d = Math.max(1, Math.floor(days) || 1);
+    const now = Date.now();
+    const base = Math.max(now, this.state.expiresAt || 0);
+    const expiresAt = base + d * 24 * 60 * 60 * 1000;
+    return this.applyServerEntitlement({
+      planId: 'monthly',
+      expiresAt,
+      paymentId: `admob-reward:${Date.now()}`,
+    });
+  }
+
   async claimWithPaymentId(paymentId: string): Promise<{ ok: boolean; error?: string }> {
     const id = paymentId.trim();
     if (id.length < 10) {
@@ -293,7 +306,6 @@ class SubscriptionServiceImpl {
     this.notify();
   }
 
-  /** AroLinks: 15 days/key, max 2 per 30 days, device-bound 12-digit. */
   async redeemPromoCode(raw: string): Promise<{ ok: boolean; error?: string; daysAdded?: number }> {
     const code = raw.trim().replace(/\D/g, '');
     if (code.length !== 12) {
