@@ -11,6 +11,8 @@ import { VoiceAssistantFab } from './src/components/voice/VoiceAssistantOverlay'
 import { YouTubeHost } from './src/player/YouTubeHost';
 import { GSplash } from './src/components/GSplash';
 import { UpdateModal } from './src/components/UpdateModal';
+import { BannerAdView } from './src/components/ads/BannerAdView';
+import { AppOpenAdController } from './src/components/ads/AppOpenAdController';
 import { COLORS } from './src/constants/theme';
 import {
   checkForUpdate,
@@ -18,6 +20,7 @@ import {
   UpdateInfo,
 } from './src/services/UpdateService';
 import { trackAppOpen } from './src/services/AnalyticsService';
+import { initAdMob } from './src/services/AdMobService';
 import Constants from 'expo-constants';
 
 export default function App() {
@@ -31,6 +34,7 @@ export default function App() {
 
   useEffect(() => {
     void trackAppOpen();
+    void initAdMob();
   }, []);
 
   useEffect(() => {
@@ -62,6 +66,8 @@ export default function App() {
                   <RootNavigator />
                   <VoiceAssistantFab />
                   <YouTubeHost />
+                  <BannerAdView />
+                  <AppOpenAdController enabled={!showSplash} />
                   <StatusBar style="light" backgroundColor="#050707" />
                   {showSplash ? (
                     <GSplash minMs={3600} onDone={() => setShowSplash(false)} />

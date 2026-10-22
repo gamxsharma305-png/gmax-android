@@ -61,6 +61,12 @@ try {
 
 const appJson = require("./app.json");
 
+// Google TEST app IDs — production me apne AdMob App IDs lagao
+const ADMOB_ANDROID_APP_ID =
+  process.env.ADMOB_ANDROID_APP_ID || "ca-app-pub-3940256099942544~3347511713";
+const ADMOB_IOS_APP_ID =
+  process.env.ADMOB_IOS_APP_ID || "ca-app-pub-3940256099942544~1458002511";
+
 module.exports = {
   ...appJson.expo,
   name: "GMAX",
@@ -110,11 +116,16 @@ module.exports = {
     ],
     "expo-asset",
     "expo-file-system",
+    [
+      "react-native-google-mobile-ads",
+      {
+        androidAppId: ADMOB_ANDROID_APP_ID,
+        iosAppId: ADMOB_IOS_APP_ID,
+      },
+    ],
     "./plugins/withCoreLibraryDesugaring",
     "./plugins/withJitpack",
     "./plugins/withAndroidAbis",
-    // withReleaseSigning REMOVED — debug keystore causes "package appears to be invalid"
-    // on Android 11+. EAS remote credentials sign with v1+v2+v3 properly.
   ],
   extra: {
     ...(appJson.expo && appJson.expo.extra ? appJson.expo.extra : {}),
