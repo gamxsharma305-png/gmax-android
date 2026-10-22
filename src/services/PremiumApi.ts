@@ -185,3 +185,98 @@ export async function verifyAroKey(code: string, deviceId: string): Promise<Veri
     return { ok: false, error: e instanceof Error ? e.message : 'Network error' };
   }
 }
+
+/* ─── Referral ─────────────────────────────────────────────── */
+
+export type ReferralInfo = {
+  ok: boolean;
+  code?: string;
+  shareUrl?: string;
+  freeGens?: number;
+  referralCount?: number;
+  referredBy?: string | null;
+  freeGenDays?: number;
+  error?: string;
+};
+
+export async function fetchReferral(deviceId: string): Promise<ReferralInfo> {
+  const root = baseUrl();
+  if (!root) return { ok: false, error: 'API not configured' };
+  try {
+    const res = await fetch(
+      `${root}/api/referral?deviceId=${encodeURIComponent(deviceId)}`
+    );
+    const data = (await res.json().catch(() => ({}))) as ReferralInfo;
+    if (!res.ok) return { ok: false, error: data.error || `HTTP ${res.status}` };
+    return {
+      ok: true,
+      code: data.code,
+      shareUrl: data.shareUrl,
+      freeGens: Number(data.freeGens) || 0,
+      referralCount: Number(data.referralCount) || 0,
+      referredBy: data.referredBy ?? null,
+      freeGenDays: data.freeGenDays ?? 7,
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error' };
+  }
+}
+
+export async function claimReferralCode(
+  deviceId: string,
+  code: string
+): Promise<{ ok: boolean; error?: string; message?: string }> {
+  const root = baseUrl();
+  if (!root) return { ok: false, error: 'API not configured' };
+  try {
+    const res = await fetch(`${root}/api/referral`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'claim', deviceId, code: code.trim() }),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      message?: string;
+    };
+    if (!res.ok || !data.ok) {
+      return { ok: false, error: data.error || `HTTP ${res.status}` };
+    }
+    return { ok: true, message: data.message || 'Referral linked' };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error' };
+  }
+}
+
+export async function redeemFreeGeneration(deviceId: string): Promise<ClaimResult> {
+  const root = baseUrl();
+  if (!root) return { ok: false, active: false, error: 'API not configured' };
+  try {
+    const res = await fetch(`${root}/api/referral`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'use', deviceId }),
+    });
+    const data = (await res.json().catch(() => ({}))) as ClaimResult & {
+      freeGensLeft?: number;
+      error?: string;
+    };
+    if (!res.ok || !data.ok) {
+      return { ok: false, active: false, error: data.error || `HTTP ${res.status}` };
+    }
+    return {
+      ok: true,
+      active: !!data.active,
+      planId: data.planId,
+      expiresAt: data.expiresAt,
+      days: data.days,
+      label: data.label,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      active: false,
+      error: e instanceof Error ? e.message : 'Network error',
+    };
+  }
+}

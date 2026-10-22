@@ -1,5 +1,13 @@
 import { readJson, writeJson, STORAGE_KEYS } from '../core/storage';
-import { claimPremium, fetchPremiumStatus, getAroKey, verifyAroKey } from './PremiumApi';
+import {
+  claimPremium,
+  fetchPremiumStatus,
+  getAroKey,
+  verifyAroKey,
+  fetchReferral,
+  claimReferralCode,
+  redeemFreeGeneration,
+} from './PremiumApi';
 
 export type PlanId = 'monthly' | 'bimonthly';
 
@@ -20,6 +28,10 @@ export type SubscriptionState = {
   activatedAt?: number;
   deviceId?: string;
   promoRedemptions?: number[];
+  referralCode?: string;
+  freeGens?: number;
+  referralCount?: number;
+  shareUrl?: string;
 };
 
 const STORAGE_KEY = 'subscription';
@@ -60,6 +72,8 @@ const DEFAULT_STATE: SubscriptionState = {
   active: false,
   planId: null,
   expiresAt: 0,
+  freeGens: 0,
+  referralCount: 0,
 };
 
 function randomId(): string {
@@ -84,6 +98,7 @@ class SubscriptionServiceImpl {
     this.recompute();
     this.loaded = true;
     void this.refreshFromServer();
+    void this.refreshReferral();
   }
 
   getDeviceId(): string {
@@ -93,7 +108,15 @@ class SubscriptionServiceImpl {
   private recompute(): void {
     const now = Date.now();
     if (this.state.expiresAt > 0 && this.state.expiresAt <= now) {
-      this.state = { ...DEFAULT_STATE, deviceId: this.deviceId, promoRedemptions: this.state.promoRedemptions };
+      this.state = {
+        ...DEFAULT_STATE,
+        deviceId: this.deviceId,
+        promoRedemptions: this.state.promoRedemptions,
+        referralCode: this.state.referralCode,
+        freeGens: this.state.freeGens,
+        referralCount: this.state.referralCount,
+        shareUrl: this.state.shareUrl,
+      };
       void writeJson(STORAGE_KEY, this.state);
     } else if (this.state.expiresAt > now) {
       this.state = { ...this.state, active: true, deviceId: this.deviceId };
@@ -145,13 +168,13 @@ class SubscriptionServiceImpl {
   }): Promise<SubscriptionState> {
     const planId = (opts.planId === 'bimonthly' ? 'bimonthly' : 'monthly') as PlanId;
     this.state = {
+      ...this.state,
       active: opts.expiresAt > Date.now(),
       planId,
       expiresAt: opts.expiresAt,
       paymentId: opts.paymentId,
       activatedAt: Date.now(),
       deviceId: this.deviceId,
-      promoRedemptions: this.state.promoRedemptions,
     };
     await writeJson(STORAGE_KEY, this.state);
     this.notify();
@@ -198,8 +221,74 @@ class SubscriptionServiceImpl {
     }
   }
 
+  async refreshReferral(): Promise<void> {
+    try {
+      const id = this.deviceId || (await this.ensureDevice());
+      const r = await fetchReferral(id);
+      if (!r.ok) return;
+      this.state = {
+        ...this.state,
+        referralCode: r.code,
+        freeGens: r.freeGens ?? 0,
+        referralCount: r.referralCount ?? 0,
+        shareUrl: r.shareUrl,
+      };
+      await writeJson(STORAGE_KEY, this.state);
+      this.notify();
+    } catch {
+      /* offline */
+    }
+  }
+
+  async claimFriendCode(code: string): Promise<{ ok: boolean; error?: string }> {
+    const id = this.deviceId || (await this.ensureDevice());
+    const result = await claimReferralCode(id, code);
+    if (!result.ok) return { ok: false, error: result.error };
+    await this.refreshReferral();
+    return { ok: true };
+  }
+
+  async useFreeGeneration(): Promise<{ ok: boolean; error?: string; days?: number }> {
+    const id = this.deviceId || (await this.ensureDevice());
+    const result = await redeemFreeGeneration(id);
+    if (!result.ok || !result.expiresAt) {
+      return { ok: false, error: result.error || 'Redeem failed' };
+    }
+    await this.applyServerEntitlement({
+      planId: result.planId || 'monthly',
+      expiresAt: result.expiresAt,
+      paymentId: `referral-free:${Date.now()}`,
+    });
+    await this.refreshReferral();
+    return { ok: true, days: result.days };
+  }
+
+  getFreeGens(): number {
+    return Number(this.state.freeGens) || 0;
+  }
+
+  getReferralCode(): string {
+    return this.state.referralCode || '';
+  }
+
+  getShareUrl(): string {
+    return this.state.shareUrl || '';
+  }
+
+  getReferralCount(): number {
+    return Number(this.state.referralCount) || 0;
+  }
+
   async clear(): Promise<void> {
-    this.state = { ...DEFAULT_STATE, deviceId: this.deviceId, promoRedemptions: this.state.promoRedemptions };
+    this.state = {
+      ...DEFAULT_STATE,
+      deviceId: this.deviceId,
+      promoRedemptions: this.state.promoRedemptions,
+      referralCode: this.state.referralCode,
+      freeGens: this.state.freeGens,
+      referralCount: this.state.referralCount,
+      shareUrl: this.state.shareUrl,
+    };
     await writeJson(STORAGE_KEY, this.state);
     this.notify();
   }
