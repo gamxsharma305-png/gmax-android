@@ -31,6 +31,7 @@ export function useSubscription() {
 
   const refresh = useCallback(async () => {
     await SubscriptionService.refreshFromServer();
+    await SubscriptionService.refreshReferral();
     setState(SubscriptionService.getState());
   }, []);
 
@@ -49,6 +50,18 @@ export function useSubscription() {
     return SubscriptionService.requestAroKey();
   }, []);
 
+  const claimFriendCode = useCallback(async (code: string) => {
+    const result = await SubscriptionService.claimFriendCode(code);
+    setState(SubscriptionService.getState());
+    return result;
+  }, []);
+
+  const useFreeGeneration = useCallback(async () => {
+    const result = await SubscriptionService.useFreeGeneration();
+    setState(SubscriptionService.getState());
+    return result;
+  }, []);
+
   return {
     ready,
     isPremium: state.active && state.expiresAt > Date.now(),
@@ -58,12 +71,18 @@ export function useSubscription() {
     daysLeft: SubscriptionService.daysLeft(),
     promoLeft: SubscriptionService.promoRedemptionsLeft(),
     deviceId: SubscriptionService.getDeviceId(),
+    referralCode: state.referralCode || '',
+    freeGens: Number(state.freeGens) || 0,
+    referralCount: Number(state.referralCount) || 0,
+    shareUrl: state.shareUrl || '',
     canDownload: () => SubscriptionService.canDownload(),
     canUseAutoPlaylist: () => SubscriptionService.canUseAutoPlaylist(),
     canCreatePlaylist: (count: number) => SubscriptionService.canCreatePlaylist(count),
     claimWithPaymentId,
     redeemPromoCode,
     requestAroKey,
+    claimFriendCode,
+    useFreeGeneration,
     refresh,
     clear,
   };
