@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   StyleSheet,
   Text,
@@ -9,12 +9,10 @@ import {
   Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BlurView } from 'expo-blur';
-import { Play, Pause, Heart } from 'lucide-react-native';
+import { Play, Pause } from 'lucide-react-native';
 import { Track } from '../../core/types';
 import { useProgress } from '../../hooks/usePlayer';
-import { useLibrary } from '../../hooks/useLibrary';
-import { COLORS, SIZES, FONTS } from '../../constants/theme';
+import { COLORS, SIZES, FONTS, SHADOWS } from '../../constants/theme';
 
 interface MiniPlayerProps {
   track: Track | null;
@@ -46,31 +44,25 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
   isLoading = false,
 }) => {
   const insets = useSafeAreaInsets();
-  const { isLiked, toggleLike } = useLibrary();
   if (!track) return null;
 
+  // Sit above tab bar + system nav (never under phone buttons)
   const systemBottom = Math.max(insets.bottom, Platform.OS === 'android' ? 28 : 8);
   const tabH = tabBarHeight ?? 52 + systemBottom;
-  const bottom = tabH + 8;
-  const liked = isLiked(track.id);
-  const art = track.albumImageUrl || '';
+  const bottom = tabH + 6;
 
   return (
     <TouchableOpacity
-      activeOpacity={0.92}
+      activeOpacity={0.9}
       onPress={onPress}
       style={[styles.positionContainer, { bottom }]}
     >
-      <View style={styles.shell}>
-        {/* Album art as soft background tint (Musify / iOS style) */}
-        {art ? (
-          <Image source={{ uri: art }} style={styles.bgArt} blurRadius={24} />
-        ) : null}
-        <View style={styles.bgDim} />
-        <BlurView intensity={55} tint="dark" style={StyleSheet.absoluteFillObject} />
-
+      <View style={[styles.container, SHADOWS.glass]}>
         <View style={styles.content}>
-          <Image source={{ uri: art }} style={styles.image} />
+          <Image
+            source={{ uri: track.albumImageUrl }}
+            style={styles.image}
+          />
           <View style={styles.infoContainer}>
             <Text style={styles.title} numberOfLines={1}>
               {track.title}
@@ -79,38 +71,27 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
               {track.artist?.name || 'Unknown'}
             </Text>
           </View>
-          <View style={styles.controls}>
-            <TouchableOpacity
-              style={styles.iconButton}
-              onPress={(e) => {
-                e.stopPropagation?.();
-                toggleLike(track);
-              }}
-              hitSlop={10}
-            >
-              <Heart
-                color={liked ? '#ff6b6b' : '#fff'}
-                fill={liked ? '#ff6b6b' : 'transparent'}
-                size={20}
+          <TouchableOpacity
+            style={styles.playButton}
+            onPress={onPlayPause}
+            hitSlop={8}
+          >
+            {isLoading ? (
+              <ActivityIndicator size="small" color={COLORS.text.primary} />
+            ) : isPlaying ? (
+              <Pause
+                color={COLORS.text.primary}
+                size={24}
+                fill={COLORS.text.primary}
               />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.playButton}
-              onPress={(e) => {
-                e.stopPropagation?.();
-                onPlayPause();
-              }}
-              hitSlop={8}
-            >
-              {isLoading ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : isPlaying ? (
-                <Pause color="#fff" size={26} fill="#fff" />
-              ) : (
-                <Play color="#fff" size={26} fill="#fff" />
-              )}
-            </TouchableOpacity>
-          </View>
+            ) : (
+              <Play
+                color={COLORS.text.primary}
+                size={24}
+                fill={COLORS.text.primary}
+              />
+            )}
+          </TouchableOpacity>
         </View>
         <MiniPlayerProgress />
       </View>
@@ -121,73 +102,57 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
 const styles = StyleSheet.create({
   positionContainer: {
     position: 'absolute',
-    left: 10,
-    right: 10,
+    left: SIZES.sm,
+    right: SIZES.sm,
     zIndex: 100,
   },
-  shell: {
-    borderRadius: 14,
+  container: {
+    borderRadius: SIZES.radius.md,
     overflow: 'hidden',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.12)',
-    backgroundColor: 'rgba(30,30,30,0.85)',
-  },
-  bgArt: {
-    ...StyleSheet.absoluteFillObject,
-    width: '100%',
-    height: '100%',
-    opacity: 0.55,
-  },
-  bgDim: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    backgroundColor: COLORS.surfaceRaised,
+    borderColor: COLORS.glassBorder,
+    borderWidth: 1,
   },
   content: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 10,
+    padding: 8,
   },
   image: {
-    width: 44,
-    height: 44,
-    borderRadius: 8,
+    width: 40,
+    height: 40,
+    borderRadius: SIZES.radius.sm,
     backgroundColor: COLORS.surfaceLight,
   },
   infoContainer: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: SIZES.sm,
     justifyContent: 'center',
   },
   title: {
     fontFamily: FONTS.medium,
     fontSize: 14,
-    color: '#fff',
+    color: COLORS.text.primary,
   },
   artist: {
     fontFamily: FONTS.regular,
     fontSize: 12,
-    color: 'rgba(255,255,255,0.7)',
+    color: COLORS.text.secondary,
     marginTop: 2,
   },
-  controls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  iconButton: {
-    padding: 8,
-  },
   playButton: {
-    padding: 8,
+    padding: SIZES.sm,
+    marginLeft: SIZES.xs,
   },
   progressTrack: {
-    height: 2.5,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    height: 2,
+    backgroundColor: COLORS.player.progressTrack,
     width: '100%',
+    position: 'absolute',
+    bottom: 0,
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#1DB954',
+    backgroundColor: COLORS.player.progressFill,
   },
 });
